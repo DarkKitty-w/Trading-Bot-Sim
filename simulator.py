@@ -221,10 +221,11 @@ class EnhancedParallelCryptoSimulatorCG:
         ax.set_ylabel("Portfolio Value ($)")
         ax.legend()
         ax.grid(True,alpha=0.3)
-        plt.show()
+        plt.savefig(os.path.join(self.output_dir, 'portfolio_comparison.png'))
+        print("📈 Plot saved as portfolio_comparison.png")
 
     ##############################
-    # Export
+    # Enhanced Export Methods
     ##############################
     def export_results(self, all_results, filename=None):
         if filename is None:
@@ -236,6 +237,32 @@ class EnhancedParallelCryptoSimulatorCG:
         df.to_csv(os.path.join(self.output_dir,filename),index=False)
         print(f"📊 Results exported to {filename}")
         return df
+
+    def enhanced_export_all_data(self, all_results):
+        """Export all simulation data including detailed trade logs"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Export summary results
+        summary_file = f"simulation_summary_{timestamp}.csv"
+        self.export_results(all_results, summary_file)
+        
+        # Export detailed trade logs for each strategy
+        for strategy, data in all_results.items():
+            trades_file = f"trades_{strategy}_{timestamp}.csv"
+            if data['trade_log']:
+                trades_df = pd.DataFrame(data['trade_log'])
+                trades_df.to_csv(os.path.join(self.output_dir, trades_file), index=False)
+                print(f"📋 Trade log exported for {strategy}")
+        
+        # Export portfolio history for each strategy
+        for strategy, data in all_results.items():
+            portfolio_file = f"portfolio_{strategy}_{timestamp}.csv"
+            if data['portfolio_history']:
+                portfolio_df = pd.DataFrame(data['portfolio_history'])
+                portfolio_df.to_csv(os.path.join(self.output_dir, portfolio_file), index=False)
+                print(f"📈 Portfolio history exported for {strategy}")
+        
+        print(f"📊 All data exported with timestamp: {timestamp}")
 
 # ------------------------
 # Usage
@@ -261,7 +288,7 @@ if __name__=="__main__":
     ]
 
     simulator = EnhancedParallelCryptoSimulatorCG(starting_cash=10000, update_interval=15)
-    print("🚀 Starting Enhanced Crypto Trading Simulation")
-    all_results = simulator.run_parallel_strategies(coins,strategies,duration_minutes=60)
-    simulator.export_results(all_results)
-    print("✅ Simulation completed!")
+    print("🚀 Starting 5-Hour Enhanced Crypto Trading Simulation")
+    all_results = simulator.run_parallel_strategies(coins, strategies, duration_minutes=300)  # 5 hours
+    simulator.enhanced_export_all_data(all_results)  # Use enhanced export
+    print("✅ 5-Hour Simulation completed! All logs saved!")
