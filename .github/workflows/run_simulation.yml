@@ -8,6 +8,7 @@ on:
 jobs:
   run-simulation:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours total timeout (5h simulation + buffer)
 
     steps:
       - name: Checkout repository
@@ -22,27 +23,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy matplotlib requests
-          # Add any other dependencies your script needs
 
       - name: Create output directory
         run: mkdir -p portfolio_logs
 
-      - name: Run Crypto Simulation
+      - name: Run 5-Hour Crypto Simulation
         run: |
-          python simulator.py  # ← Change this to your actual file
-        # Continue on error if you want the workflow to complete even if script fails
-        # continue-on-error: true
-
-      - name: Check if results exist
-        run: |
-          if [ ! -f "portfolio_logs/"*.csv ]; then
-            echo "No CSV files found in portfolio_logs/"
-            exit 1
-          fi
-
-      - name: Upload simulation results
-        uses: actions/upload-artifact@v3
-        with:
-          name: crypto-simulation-results
-          path: portfolio_logs/*.csv
-          retention-days: 30
