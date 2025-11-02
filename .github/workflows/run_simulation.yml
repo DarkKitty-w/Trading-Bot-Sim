@@ -29,7 +29,7 @@ jobs:
 
       - name: Run Crypto Simulation
         run: |
-          python simulation.py  # ← Change this to your actual file
+          python simulator.py  # ← Change this to your actual file
         # Continue on error if you want the workflow to complete even if script fails
         # continue-on-error: true
 
