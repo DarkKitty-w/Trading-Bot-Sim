@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -43,28 +43,28 @@ jobs:
           find portfolio_logs -name "*.png" | head -10
 
       - name: Upload simulation results (CSV)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crypto-simulation-csv-results
           path: portfolio_logs/*.csv
           retention-days: 30
 
       - name: Upload checkpoint files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crypto-checkpoint-files
           path: portfolio_logs/*.pkl
           retention-days: 30
 
       - name: Upload plot files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crypto-plot-files
           path: portfolio_logs/*.png
           retention-days: 30
 
       - name: Upload all logs (backup)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crypto-all-logs-backup
           path: portfolio_logs/*
