@@ -20,16 +20,44 @@ class EnhancedParallelCryptoSimulatorCG:
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.params = {
-            "MA_Original": {"window": 5, "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.10},
-            "MA_Fast": {"short_window": 3, "long_window": 10, "use_ema": True, "max_position_pct": 0.20, "stop_loss_pct": 0.08},
-            "MA_Enhanced": {"short_window": 5, "long_window": 20, "volatility_threshold": 0.001, "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15},
-            "Momentum_Enhanced": {"period": 1, "threshold": 0.5, "smoothing": 1, "max_position_pct": 0.9, "stop_loss_pct": 0.7},
-            "Breakout": {"period": 5, "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12},
-            "MACD": {"fast": 12, "slow": 26, "signal": 9, "max_position_pct": 0.15, "stop_loss_pct": 0.06},
-            "ATR_Breakout": {"period": 14, "multiplier": 2.0, "max_position_pct": 0.12, "stop_loss_pct": 2.0, "take_profit_pct": 3.0},
-            "ADX_Trend": {"period": 14, "min_strength": 25, "max_position_pct": 0.10, "stop_loss_pct": 0.08},
-            "MeanReversion": {"period": 20, "buy_threshold": 0.98, "sell_threshold": 1.02, "max_position_pct": 0.08, "take_profit_pct": 1.015}
+            "MA_Original": {"window": 5, "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.10, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_price_variation_pct
+            "MA_Fast": {"short_window": 3, "long_window": 10, "use_ema": True, "use_kama": False, "kama_fast_period": 2, "kama_slow_period": 30, "max_position_pct": 0.20, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "timeframes": ['1m', '5m', '15m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
+            "MA_Enhanced": {"short_window": 5, "long_window": 20, "volatility_threshold": 0.0005, "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered volatility_threshold and min_price_variation_pct, reduced confirmation_periods
+            "Momentum_Enhanced": {"period": 1, "threshold": 0.3, "smoothing": 1, "max_position_pct": 0.9, "stop_loss_pct": 0.7, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m']}, # Lowered threshold
+            "Breakout": {"period": 5, "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '15m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
+            "MACD": {"fast": 12, "slow": 26, "signal": 9, "max_position_pct": 0.15, "stop_loss_pct": 0.06, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
+            "ATR_Breakout": {"period": 14, "multiplier": 1.5, "max_position_pct": 0.12, "stop_loss_pct": 2.0, "take_profit_pct": 3.0, "min_price_variation_pct": 0.0008, "confirmation_periods": 1, "timeframes": ['1m', '15m']}, # Lowered multiplier and min_price_variation_pct, reduced confirmation_periods
+            "ADX_Trend": {"period": 14, "min_strength": 20, "max_position_pct": 0.10, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_strength and min_price_variation_pct, reduced confirmation_periods
+            "MeanReversion": {"period": 20, "buy_threshold": 0.99, "sell_threshold": 1.01, "max_position_pct": 0.08, "take_profit_pct": 1.015, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "limit_buy_offset_pct": -0.003, "trailing_stop_pct": 0.02, "timeframes": ['1m', '5m']} # Adjusted thresholds, min_price_variation_pct, limit_buy_offset_pct, and trailing_stop_pct, reduced confirmation_periods
         }
+        self.coingecko_id_map = {
+         "BTC-USD": "90",
+         "ETH-USD": "80",
+         "XRP-USD": "58",
+         "BNB-USD": "2710",
+         "SOL-USD": "48543",
+         "DOGE-USD": "2",
+         "ADA-USD": "257",
+         "LINK-USD": "2751",
+         "HBAR-USD": "48555",
+         "AVAX-USD": "44883",
+         "LTC-USD": "1",
+         "SHIB-USD": "45088",
+         "DOT-USD": "45219",
+         "AAVE-USD": "46018",
+         "NEAR-USD": "48563",
+         "ICP-USD": "47311",
+         "ATOM-USD": "33830",
+         "SAND-USD": "45161",
+         "AR-USD": "42441"
+     }
+        # Dictionaries to store historical data at different granularities
+        self.historical_data = {
+            '1m': {},
+            '5m': {},
+            '15m': {}
+        }
+        self._last_update_time = None
 
     ##############################
     # Checkpoint methods
@@ -51,7 +79,7 @@ class EnhancedParallelCryptoSimulatorCG:
         return {}
 
     ##############################
-    # CoinGecko Data Fetching
+    # CoinGecko Data Fetching - REPAIRED VERSION
     ##############################
     def start_real_time_data(self, coins):
         self.is_running = True
@@ -59,7 +87,7 @@ class EnhancedParallelCryptoSimulatorCG:
         self.data_thread = threading.Thread(target=self._update_real_time_data)
         self.data_thread.daemon = True
         self.data_thread.start()
-        print(f"🔄 Started real-time CoinGecko data for {len(coins)} coins")
+        print(f"🔄 Started real-time CoinLore data for {len(coins)} coins")
 
     def stop_real_time_data(self):
         self.is_running = False
@@ -68,39 +96,143 @@ class EnhancedParallelCryptoSimulatorCG:
     def _update_real_time_data(self):
         while self.is_running:
             try:
-                coin_ids = [c.split('-')[0].lower() for c in self.coins]
-                url = f"https://api.coingecko.com/api/v3/simple/price?ids={','.join(coin_ids)}&vs_currencies=usd"
-                resp = requests.get(url).json()
-                if 'error' in resp:
-                    print(f"API Error: {resp['error']}")
+                # Get valid CoinLore IDs (on réutilise coingecko_id_map pour les IDs CoinLore)
+                coin_ids_for_api = []
+                valid_coins = []
+
+                for coin in self.coins:
+                    if coin in self.coingecko_id_map:
+                        coin_ids_for_api.append(self.coingecko_id_map[coin])
+                        valid_coins.append(coin)
+                    else:
+                        print(f"⚠️ Warning: {coin} not found in CoinLore mapping (in coingecko_id_map)")
+
+                if not coin_ids_for_api:
+                    print("❌ Error: No valid coins to fetch.")
                     time.sleep(60)
                     continue
 
+                # Construire URL pour CoinLore : /api/ticker/?id=ID1,ID2,...
+                ids_param = ",".join(coin_ids_for_api)
+                url = f"https://api.coinlore.net/api/ticker/?id={ids_param}"
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code != 200:
+                    print(f"❌ API Error (CoinLore): Status code {response.status_code}")
+                    print("DEBUG: response.text:", response.text)
+                    time.sleep(60)
+                    continue
+
+                resp = response.json()
+                # resp est une liste d’objets JSON, ex : [ { "id":"90", "symbol":"BTC", "price_usd":"12345.67", … }, … ]
+
+                current_time = datetime.now()
+
                 with self.data_lock:
-                    for coin in self.coins:
-                        cid = coin.split('-')[0].lower()
-                        if cid in resp and 'usd' in resp[cid]:
-                            price = float(resp[cid]['usd'])
-                            if coin not in self.live_data:
-                                self.live_data[coin] = {'history': pd.Series([price]), 'price': price, 'timestamp': datetime.now()}
-                            else:
-                                self.live_data[coin]['history'] = pd.concat([self.live_data[coin]['history'], pd.Series([price])]).tail(100)
-                                self.live_data[coin]['price'] = price
-                                self.live_data[coin]['timestamp'] = datetime.now()
-                print(f"✅ Updated {len(self.coins)} coins at {datetime.now().strftime('%H:%M:%S')}")
+                    updated_count = 0
+                    for coin in valid_coins:
+                        lore_id = self.coingecko_id_map[coin]
+                        obj = None
+                        for item in resp:
+                            if str(item.get("id")) == str(lore_id):
+                                obj = item
+                                break
+
+                        if obj is None:
+                            print(f"⚠️ No JSON object for {coin} with id {lore_id}")
+                            continue
+
+                        price_usd = obj.get("price_usd")
+                        if price_usd is None:
+                            print(f"⚠️ price_usd missing for {coin}: {price_usd}")
+                            continue
+
+                        try:
+                            price = float(price_usd)
+                        except ValueError:
+                            print(f"⚠️ Cannot convert price_usd to float for {coin}: {price_usd}")
+                            continue
+
+                        # print(f"🪙 {coin}: ${price:,.2f} USD (CoinLore)") # Suppress frequent logging
+
+                        if coin not in self.live_data:
+                            self.live_data[coin] = {
+                                'history': pd.Series([price], index=[current_time]),
+                                'price': price,
+                                'timestamp': current_time
+                            }
+                            # Initialize historical_data for the coin
+                            for timeframe in self.historical_data.keys():
+                                self.historical_data[timeframe][coin] = pd.Series([price], index=[current_time])
+                        else:
+                            new_data = pd.Series([price], index=[current_time])
+                            self.live_data[coin]['history'] = pd.concat([
+                                self.live_data[coin]['history'],
+                                new_data
+                            ])#.tail(100) # Keep all data for downsampling
+                            self.live_data[coin]['price'] = price
+                            self.live_data[coin]['timestamp'] = current_time
+
+                            # Update historical_data at different granularities
+                            for timeframe, data_series_dict in self.historical_data.items():
+                                # Determine the interval in minutes
+                                interval_minutes = int(timeframe[:-1])
+                                # Check if the current time aligns with the timeframe interval
+                                if self._last_update_time is None or (current_time - self._last_update_time).total_seconds() >= interval_minutes * 60:
+                                     # Append the current price if enough time has passed or it's the first update
+                                     data_series_dict[coin] = pd.concat([
+                                         data_series_dict.get(coin, pd.Series([], dtype=float)), # Handle initial case
+                                         pd.Series([price], index=[current_time])
+                                     ])
+
+
+                        updated_count += 1
+
+                    if updated_count > 0:
+                         self._last_update_time = current_time # Update last update time only if data was successfully updated
+                         print(f"✅ Updated {updated_count}/{len(valid_coins)} coins at {current_time.strftime('%H:%M:%S')}")
+
+
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Network error fetching data (CoinLore): {e}")
+                time.sleep(30)
             except Exception as e:
-                print(f"❌ Error fetching data: {e}")
+                print(f"❌ Unexpected error in data update (CoinLore): {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(30)
+
             time.sleep(self.update_interval)
 
     def get_current_prices(self):
+        """Récupère les prix les plus récents de live_data."""
         with self.data_lock:
+            # retourne un dict {coin: price}
             return {coin: data['price'] for coin, data in self.live_data.items() if 'price' in data}
 
-    def get_price_history(self, coin, lookback=50):
+    def get_price_history(self, coin, timeframe='1m', limit=None):
+        """
+        Récupère l’historique des prix pour un coin à une granularité donnée, limité si besoin.
+        timeframe: '1m', '5m', '15m'
+        """
         with self.data_lock:
-            if coin in self.live_data:
-                return self.live_data[coin]['history'].tail(lookback)
-        return pd.Series(dtype=float)
+            if timeframe in self.historical_data and coin in self.historical_data[timeframe]:
+                history = self.historical_data[timeframe][coin]
+                if limit is not None:
+                    return history.tail(limit)
+                return history
+            # Fallback to the most granular data if requested timeframe is not available
+            elif coin in self.live_data and 'history' in self.live_data[coin]:
+                 print(f"⚠️ Requested timeframe '{timeframe}' not available for {coin}, using full history.")
+                 history = self.live_data[coin]['history']
+                 if limit is not None:
+                     return history.tail(limit)
+                 return history
+            return pd.Series([]) # retourne une série vide si pas de données
 
     ##############################
     # Indicators & Signals
