@@ -1,70 +1,55 @@
-import requests
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-import threading
 import time
+import threading
+import requests
 import os
-import pickle
+from datetime import datetime, timedelta
+import concurrent.futures
+import scipy.optimize as sco # Import scipy.optimize for optimization
 
 class EnhancedParallelCryptoSimulatorCG:
-    def __init__(self, starting_cash=1000.0, update_interval=10):
+    def __init__(self, starting_cash=1000.0, update_interval=5, max_history_points=1000, max_drawdown_pct=0.20): # Added max_drawdown_pct
         self.starting_cash = starting_cash
         self.transaction_cost = 0.001
         self.update_interval = update_interval
+        self.max_history_points = max_history_points
+        self.max_drawdown_pct = max_drawdown_pct  # Maximum acceptable drawdown percentage
         self.live_data = {}
         self.is_running = False
         self.data_lock = threading.Lock()
         self.output_dir = "portfolio_logs"
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Strategy parameters with added min_price_variation_pct, use_kama, limit_buy_offset_pct, and trailing_stop_pct
         self.params = {
-            "MA_Original": {"window": 5, "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.10, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_price_variation_pct
-            "MA_Fast": {"short_window": 3, "long_window": 10, "use_ema": True, "use_kama": False, "kama_fast_period": 2, "kama_slow_period": 30, "max_position_pct": 0.20, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "timeframes": ['1m', '5m', '15m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
-            "MA_Enhanced": {"short_window": 5, "long_window": 20, "volatility_threshold": 0.0005, "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered volatility_threshold and min_price_variation_pct, reduced confirmation_periods
-            "Momentum_Enhanced": {"period": 1, "threshold": 0.3, "smoothing": 1, "max_position_pct": 0.9, "stop_loss_pct": 0.7, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m']}, # Lowered threshold
-            "Breakout": {"period": 5, "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '15m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
-            "MACD": {"fast": 12, "slow": 26, "signal": 9, "max_position_pct": 0.15, "stop_loss_pct": 0.06, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_price_variation_pct, reduced confirmation_periods
-            "ATR_Breakout": {"period": 14, "multiplier": 1.5, "max_position_pct": 0.12, "stop_loss_pct": 2.0, "take_profit_pct": 3.0, "min_price_variation_pct": 0.0008, "confirmation_periods": 1, "timeframes": ['1m', '15m']}, # Lowered multiplier and min_price_variation_pct, reduced confirmation_periods
-            "ADX_Trend": {"period": 14, "min_strength": 20, "max_position_pct": 0.10, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.0005, "confirmation_periods": 1, "timeframes": ['1m', '5m']}, # Lowered min_strength and min_price_variation_pct, reduced confirmation_periods
-            "MeanReversion": {"period": 20, "buy_threshold": 0.99, "sell_threshold": 1.01, "max_position_pct": 0.08, "take_profit_pct": 1.015, "min_price_variation_pct": 0.0003, "confirmation_periods": 1, "limit_buy_offset_pct": -0.003, "trailing_stop_pct": 0.02, "timeframes": ['1m', '5m']} # Adjusted thresholds, min_price_variation_pct, limit_buy_offset_pct, and trailing_stop_pct, reduced confirmation_periods
+            "MA_Original": {"window": 5, "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.10, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
+            "MA_Fast": {"short_window": 3, "long_window": 10, "use_ema": True, "use_kama": False, "kama_fast_period": 2, "kama_slow_period": 30, "max_position_pct": 0.20, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m', '15m']},
+            "MA_Enhanced": {"short_window": 5, "long_window": 20, "volatility_threshold": 0.0005, "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
+            "Momentum_Enhanced": {"period": 1, "threshold": 0.3, "smoothing": 1, "max_position_pct": 0.9, "stop_loss_pct": 0.7, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m']},
+            "Breakout": {"period": 5, "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '15m']},
+            "MACD": {"fast": 12, "slow": 26, "signal": 9, "max_position_pct": 0.15, "stop_loss_pct": 0.06, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
+            "ATR_Breakout": {"period": 14, "multiplier": 1.5, "max_position_pct": 0.12, "stop_loss_pct": 2.0, "take_profit_pct": 3.0, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '15m']},
+            "ADX_Trend": {"period": 14, "min_strength": 20, "max_position_pct": 0.10, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
+            "MeanReversion": {"period": 20, "buy_threshold": 0.99, "sell_threshold": 1.01, "max_position_pct": 0.08, "take_profit_pct": 1.015, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "limit_buy_offset_pct": -0.003, "trailing_stop_pct": 0.02, "timeframes": ['1m', '5m']}
         }
 
-        # Dictionnaire pour "traduire" nos noms en ID CoinGecko
         self.coingecko_id_map = {
-         "BTC-USD": "90",
-         "ETH-USD": "80",
-         "XRP-USD": "58",
-         "BNB-USD": "2710",
-         "SOL-USD": "48543",
-         "DOGE-USD": "2",
-         "ADA-USD": "257",
-         "LINK-USD": "2751",
-         "HBAR-USD": "48555",
-         "AVAX-USD": "44883",
-         "LTC-USD": "1",
-         "SHIB-USD": "45088",
-         "DOT-USD": "45219",
-         "AAVE-USD": "46018",
-         "NEAR-USD": "48563",
-         "ICP-USD": "47311",
-         "ATOM-USD": "33830",
-         "SAND-USD": "45161",
-         "AR-USD": "42441"
-     }
-        # Dictionaries to store historical data at different granularities
-        self.historical_data = {
-            '1m': {},
-            '5m': {},
-            '15m': {}
+            "BTC-USD": "90", "ETH-USD": "80", "XRP-USD": "58", "BNB-USD": "2710",
+            "SOL-USD": "48543", "DOGE-USD": "2", "ADA-USD": "257", "LINK-USD": "2751",
+            "HBAR-USD": "48555", "AVAX-USD": "44883", "LTC-USD": "1", "SHIB-USD": "45088",
+            "DOT-USD": "45219", "AAVE-USD": "46018", "NEAR-USD": "48563", "ICP-USD": "47311",
+            "ATOM-USD": "33830", "SAND-USD": "45161", "AR-USD": "42441"
+        }
+
+        self.historical_data_dfs = {
+            '1m': pd.DataFrame(columns=list(self.coingecko_id_map.keys())),
+            '5m': pd.DataFrame(columns=list(self.coingecko_id_map.keys())),
+            '15m': pd.DataFrame(columns=list(self.coingecko_id_map.keys()))
         }
         self._last_update_time = None
+        self._last_timeframe_update = {tf: None for tf in self.historical_data_dfs.keys()}
 
-    ##############################
-    # CoinGecko Data Fetching - REPAIRED VERSION
-    ##############################
     def start_real_time_data(self, coins):
         self.is_running = True
         self.coins = coins
@@ -80,7 +65,6 @@ class EnhancedParallelCryptoSimulatorCG:
     def _update_real_time_data(self):
         while self.is_running:
             try:
-                # Get valid CoinLore IDs (on réutilise coingecko_id_map pour les IDs CoinLore)
                 coin_ids_for_api = []
                 valid_coins = []
 
@@ -89,14 +73,13 @@ class EnhancedParallelCryptoSimulatorCG:
                         coin_ids_for_api.append(self.coingecko_id_map[coin])
                         valid_coins.append(coin)
                     else:
-                        print(f"⚠️ Warning: {coin} not found in CoinLore mapping (in coingecko_id_map)")
+                        print(f"⚠️ Warning: {coin} not found in CoinLore mapping")
 
                 if not coin_ids_for_api:
                     print("❌ Error: No valid coins to fetch.")
                     time.sleep(60)
                     continue
 
-                # Construire URL pour CoinLore : /api/ticker/?id=ID1,ID2,...
                 ids_param = ",".join(coin_ids_for_api)
                 url = f"https://api.coinlore.net/api/ticker/?id={ids_param}"
 
@@ -107,359 +90,298 @@ class EnhancedParallelCryptoSimulatorCG:
                 response = requests.get(url, headers=headers, timeout=10)
                 if response.status_code != 200:
                     print(f"❌ API Error (CoinLore): Status code {response.status_code}")
-                    print("DEBUG: response.text:", response.text)
                     time.sleep(60)
                     continue
 
                 resp = response.json()
-                # resp est une liste d’objets JSON, ex : [ { "id":"90", "symbol":"BTC", "price_usd":"12345.67", … }, … ]
-
                 current_time = datetime.now()
 
                 with self.data_lock:
                     updated_count = 0
-                    for coin in valid_coins:
-                        lore_id = self.coingecko_id_map[coin]
-                        obj = None
-                        for item in resp:
-                            if str(item.get("id")) == str(lore_id):
-                                obj = item
-                                break
-
-                        if obj is None:
-                            print(f"⚠️ No JSON object for {coin} with id {lore_id}")
+                    current_prices_dict = {}
+                    for item in resp:
+                        lore_id = item.get("id")
+                        price_usd = item.get("price_usd")
+                        if lore_id is None or price_usd is None:
                             continue
 
-                        price_usd = obj.get("price_usd")
-                        if price_usd is None:
-                            print(f"⚠️ price_usd missing for {coin}: {price_usd}")
+                        coin = None
+                        for key, value in self.coingecko_id_map.items():
+                            if value == lore_id:
+                                coin = key
+                                break
+
+                        if coin is None:
+                            print(f"⚠️ Unknown CoinLore ID received: {lore_id}")
                             continue
 
                         try:
                             price = float(price_usd)
+                            current_prices_dict[coin] = price
+                            if coin not in self.live_data:
+                                self.live_data[coin] = {'price': price, 'timestamp': current_time}
+                            else:
+                                self.live_data[coin]['price'] = price
+                                self.live_data[coin]['timestamp'] = current_time
+                            updated_count += 1
                         except ValueError:
-                            print(f"⚠️ Cannot convert price_usd to float for {coin}: {price_usd}")
                             continue
 
-                        # print(f"🪙 {coin}: ${price:,.2f} USD (CoinLore)") # Suppress frequent logging
-
-                        if coin not in self.live_data:
-                            self.live_data[coin] = {
-                                'history': pd.Series([price], index=[current_time]),
-                                'price': price,
-                                'timestamp': current_time
-                            }
-                            # Initialize historical_data for the coin
-                            for timeframe in self.historical_data.keys():
-                                self.historical_data[timeframe][coin] = pd.Series([price], index=[current_time])
-                        else:
-                            new_data = pd.Series([price], index=[current_time])
-                            self.live_data[coin]['history'] = pd.concat([
-                                self.live_data[coin]['history'],
-                                new_data
-                            ])#.tail(100) # Keep all data for downsampling
-                            self.live_data[coin]['price'] = price
-                            self.live_data[coin]['timestamp'] = current_time
-
-                            # Update historical_data at different granularities
-                            for timeframe, data_series_dict in self.historical_data.items():
-                                # Determine the interval in minutes
-                                interval_minutes = int(timeframe[:-1])
-                                # Check if the current time aligns with the timeframe interval
-                                if self._last_update_time is None or (current_time - self._last_update_time).total_seconds() >= interval_minutes * 60:
-                                     # Append the current price if enough time has passed or it's the first update
-                                     data_series_dict[coin] = pd.concat([
-                                         data_series_dict.get(coin, pd.Series([], dtype=float)), # Handle initial case
-                                         pd.Series([price], index=[current_time])
-                                     ])
-
-
-                        updated_count += 1
-
                     if updated_count > 0:
-                         self._last_update_time = current_time # Update last update time only if data was successfully updated
-                         print(f"✅ Updated {updated_count}/{len(valid_coins)} coins at {current_time.strftime('%H:%M:%S')}")
+                        for timeframe, data_df in self.historical_data_dfs.items():
+                            interval_minutes = int(timeframe[:-1])
+                            if self._last_timeframe_update.get(timeframe) is None or \
+                               (current_time - self._last_timeframe_update[timeframe]).total_seconds() >= interval_minutes * 60:
 
+                                new_row = pd.DataFrame([current_prices_dict], index=[current_time])
+                                self.historical_data_dfs[timeframe] = pd.concat([data_df, new_row]).tail(self.max_history_points)
+                                self._last_timeframe_update[timeframe] = current_time
+
+                        self._last_update_time = current_time
+                        print(f"✅ Updated {updated_count}/{len(valid_coins)} coins at {current_time.strftime('%H:%M:%S')}")
 
             except requests.exceptions.RequestException as e:
-                print(f"❌ Network error fetching data (CoinLore): {e}")
+                print(f"❌ Network error fetching data: {e}")
                 time.sleep(30)
             except Exception as e:
-                print(f"❌ Unexpected error in data update (CoinLore): {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ Unexpected error in data update: {e}")
                 time.sleep(30)
 
             time.sleep(self.update_interval)
 
+
     def get_current_prices(self):
-        """Récupère les prix les plus récents de live_data."""
         with self.data_lock:
-            # retourne un dict {coin: price}
             return {coin: data['price'] for coin, data in self.live_data.items() if 'price' in data}
 
-    def get_price_history(self, coin, timeframe='1m', limit=None):
+    def get_price_history(self, coin, timeframe='1m', limit=None) -> pd.Series:
         """
         Récupère l’historique des prix pour un coin à une granularité donnée, limité si besoin.
-        timeframe: '1m', '5m', '15m'
+        Retourne une pd.Series.
         """
         with self.data_lock:
-            if timeframe in self.historical_data and coin in self.historical_data[timeframe]:
-                history = self.historical_data[timeframe][coin]
+            if timeframe in self.historical_data_dfs and coin in self.historical_data_dfs[timeframe].columns:
+                history_df = self.historical_data_dfs[timeframe][coin]
                 if limit is not None:
-                    return history.tail(limit)
-                return history
-            # Fallback to the most granular data if requested timeframe is not available
+                    return history_df.tail(limit)
+                return history_df
             elif coin in self.live_data and 'history' in self.live_data[coin]:
-                 print(f"⚠️ Requested timeframe '{timeframe}' not available for {coin}, using full history.")
+                 print(f"⚠️ Requested timeframe '{timeframe}' not available in DataFrames for {coin}, using raw history.")
                  history = self.live_data[coin]['history']
                  if limit is not None:
                      return history.tail(limit)
                  return history
-            return pd.Series([]) # retourne une série vide si pas de données
+            return pd.Series([], dtype=float)
 
 
     ##############################
-    # Technical Indicators
+    # Technical Indicators (Vectorized)
     ##############################
     def calculate_technical_indicators(self, prices: pd.Series, strategy: str, lookback_period: int = 30):
         """
-        Calculate additional technical indicators for better strategy decisions.
+        Calculate additional technical indicators using vectorized operations.
         `prices` : pd.Series (index temporel) des prix.
-        `strategy` : (non utilisé ici, mais tu peux l’intégrer pour choisir les indicateurs à calculer).
+        `strategy` : (non utilisé ici).
         `lookback_period`: The number of periods to look back for calculations.
         Retourne un dict d’indicateurs calculés.
         """
         if prices is None or len(prices) < 2:
             return {}
 
-        # Ensure we have enough data for the lookback period
-        if len(prices) < lookback_period:
-            # Use all available data if less than lookback_period
-            prices_subset = prices
-        else:
-            prices_subset = prices.tail(lookback_period)
-
         indicators = {}
 
-        # Volatilité & momentum
-        if len(prices_subset) > 1:
-            returns = prices_subset.pct_change().dropna()
-            if not returns.empty:
-                indicators['volatility'] = returns.std()
-            else:
-                 indicators['volatility'] = 0.0
+        # Volatility & momentum (vectorized)
+        if len(prices) > 1:
+            returns = prices.pct_change().dropna()
+            indicators['volatility'] = returns.std() if not returns.empty else 0.0
 
-            # momentum : variation sur lookback_period
-            if len(prices_subset) >= lookback_period:
-                 try:
-                     indicators['momentum'] = (prices_subset.iloc[-1] / prices_subset.iloc[0] - 1)
-                 except Exception:
-                     indicators['momentum'] = 0.0
-                 except IndexError: # Handle case where prices_subset might have only one element after subsetting
+            if len(prices) >= lookback_period and lookback_period > 0:
+                try:
+                    indicators['momentum'] = (prices.iloc[-1] / prices.iloc[-lookback_period] - 1) if prices.iloc[-lookback_period] != 0 else 0.0
+                except IndexError:
+                    indicators['momentum'] = 0.0
+            elif len(prices) > 1:
+                try:
+                    indicators['momentum'] = (prices.iloc[-1] / prices.iloc[0] - 1) if prices.iloc[0] != 0 else 0.0
+                except IndexError:
                     indicators['momentum'] = 0.0
             else:
-                 # If not enough data for full lookback, calculate momentum over available data
-                 if len(prices_subset) > 1:
-                     try:
-                         indicators['momentum'] = (prices_subset.iloc[-1] / prices_subset.iloc[0] - 1)
-                     except Exception:
-                         indicators['momentum'] = 0.0
-                     except IndexError: # Handle case where prices_subset might have only one element after subsetting
-                        indicators['momentum'] = 0.0
-                 else:
-                     indicators['momentum'] = 0.0
+                indicators['momentum'] = 0.0
 
 
-        # RSI (Relative Strength Index) — version “classique 14”
-        rsi_period = 14 # Use standard RSI period, but ensure enough data
-        if len(prices_subset) > rsi_period:
-            delta = prices_subset.diff()
-            # gains ; pertes
-            gain = delta.where(delta > 0, 0.0)
-            loss = -delta.where(delta < 0, 0.0)
-            # moyenne sur fenêtre de 14 (simple)
-            avg_gain = gain.rolling(window=rsi_period).mean()
-            avg_loss = loss.rolling(window=rsi_period).mean()
-            # éviter division par zéro
+        # RSI (Relative Strength Index) — vectorized
+        rsi_period = 14
+        if len(prices) > rsi_period:
+            delta = prices.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+
+            avg_gain = gain.ewm(com=rsi_period-1, adjust=False).mean()
+            avg_loss = loss.ewm(com=rsi_period-1, adjust=False).mean()
+
             rs = avg_gain / (avg_loss + 1e-9)
             rsi_series = 100 - (100 / (1 + rs))
-            # le RSI “dernier”
-            last_rsi = rsi_series.iloc[-1]
-            indicators['rsi'] = last_rsi
+            indicators['rsi'] = rsi_series.iloc[-1] if not rsi_series.empty else 50
         else:
-            indicators['rsi'] = 50 # Neutral RSI if not enough data
+            indicators['rsi'] = 50
 
         return indicators
 
     ##############################
-# Trading Strategies - Version corrigée et agressive
-##############################
-    def generate_signal(self, prices: pd.Series, strategy: str, lookback_period: int = 30, min_price_variation_pct: float = 0.0001) -> pd.Series:
+    # Trading Strategies (Vectorized)
+    ##############################
+    def generate_signal(self, prices: pd.Series, strategy: str, lookback_period: int = 30, min_price_variation_pct: float = 0.00005) -> int:
         """
         Génère un signal de trading (1 = achat, -1 = vente, 0 = neutre) selon la stratégie donnée.
-        Version optimisée : signaux plus réactifs, sans blocages de logique.
-        """
-        # Vérification de base
-        if prices is None or prices.empty or len(prices) < 3:
-            return pd.Series([0] * len(prices), index=prices.index if prices is not None else None)
-
-        # Sélection de la fenêtre d'analyse
-        prices_subset = prices.tail(lookback_period).copy() # Added .copy() to avoid SettingWithCopyWarning
-
-        # Variations court terme / long terme
-        short_var = (prices_subset.iloc[-1] - prices_subset.iloc[-2]) / prices_subset.iloc[-2] if len(prices_subset) >= 2 else 0
-        long_var = (prices_subset.iloc[-1] / prices_subset.iloc[0] - 1) if len(prices_subset) > 1 else 0 # Changed from > 2 to > 1 for long_var calculation
-
-        # Signal neutre initial
-        sig = pd.Series(0, index=[prices_subset.index[-1]]) # Initialize with a single value for the last timestamp
-
-        # Petit filtre anti-bruit (empêche de trader sur micro-variations)
-        if strategy in ("Momentum_Enhanced", "Breakout") and abs(short_var) < min_price_variation_pct:
-            return pd.Series([0] * len(prices), index=prices.index) # Return neutral signal for the whole series
-
-        # --- LOGIQUE PAR STRATÉGIE ---
-        p = self.params.get(strategy, {})
-        s = 0  # signal scalaire
-
-        # MA_Original
-        if strategy == "MA_Original":
-            window = min(p.get("window", 5), len(prices_subset))
-            if window >= 2: # Ensure enough data for MA calculation
-                ma = prices_subset.rolling(window=window).mean()
-                if not ma.empty:
-                    s = 1 if prices_subset.iloc[-1] > ma.iloc[-1] else -1
-
-        # MA_Fast
-        elif strategy == "MA_Fast":
-            short_window = min(p.get("short_window", 5), len(prices_subset))
-            long_window = min(p.get("long_window", 20), len(prices_subset))
-            if short_window >= 2 and long_window >= 2: # Ensure enough data for MA calculation
-                if p.get("use_ema", True):
-                    short_ma = prices_subset.ewm(span=short_window, adjust=False).mean()
-                    long_ma = prices_subset.ewm(span=long_window, adjust=False).mean()
-                else:
-                    short_ma = prices_subset.rolling(window=short_window).mean()
-                    long_ma = prices_subset.rolling(window=long_window).mean()
-                if not short_ma.empty and not long_ma.empty:
-                    s = 1 if short_ma.iloc[-1] > long_ma.iloc[-1] else -1
-
-        # MA_Enhanced
-        elif strategy == "MA_Enhanced":
-            short_window = min(p.get("short_window", 5), len(prices_subset))
-            long_window = min(p.get("long_window", 20), len(prices_subset))
-            if short_window >= 2 and long_window >= 2: # Ensure enough data for MA calculation
-                vol_window = min(10, len(prices_subset))
-                vol = prices_subset.pct_change().rolling(window=vol_window).std()
-                short_ema = prices_subset.ewm(span=short_window, adjust=False).mean()
-                long_ema = prices_subset.ewm(span=long_window, adjust=False).mean()
-                if not vol.empty and not short_ema.empty and not long_ema.empty:
-                    if vol.iloc[-1] > p.get("volatility_threshold", 0.0003):
-                        s = 1 if short_ema.iloc[-1] > long_ema.iloc[-1] else -1
-
-        # Momentum_Enhanced
-        elif strategy == "Momentum_Enhanced":
-            period = min(p.get("period", 1), len(prices_subset) - 1)
-            if period >= 1: # Ensure enough data for momentum calculation
-                mom = prices_subset.pct_change(period)
-                smoothing = min(p.get("smoothing", 1), len(mom) if not mom.empty else 0)
-                if smoothing > 1:
-                    mom = mom.rolling(window=smoothing).mean()
-                threshold = p.get("threshold", 0.2)
-                if not mom.empty:
-                    mom_val = mom.iloc[-1]
-                    if mom_val > threshold: s = 1
-                    elif mom_val < -threshold: s = -1
-
-        # Breakout
-        elif strategy == "Breakout":
-            period = min(p.get("period", 5), len(prices_subset) - 1)
-            if period >= 1: # Ensure enough data for breakout calculation
-                res = prices_subset.rolling(window=period).max()
-                sup = prices_subset.rolling(window=period).min()
-                if not res.empty and not sup.empty and len(prices_subset) > 1:
-                    if prices_subset.iloc[-1] > res.shift(1).iloc[-1]: s = 1
-                    elif prices_subset.iloc[-1] < sup.shift(1).iloc[-1]: s = -1
-
-        # MACD
-        elif strategy == "MACD":
-            fast = min(p.get("fast", 12), len(prices_subset))
-            slow = min(p.get("slow", 26), len(prices_subset))
-            signal_win = min(p.get("signal", 9), len(prices_subset))
-            if fast >= 2 and slow >= 2 and signal_win >= 1: # Ensure enough data for MACD calculation
-                exp1 = prices_subset.ewm(span=fast, adjust=False).mean()
-                exp2 = prices_subset.ewm(span=slow, adjust=False).mean()
-                macd = exp1 - exp2
-                signal_line = macd.ewm(span=signal_win, adjust=False).mean()
-                if not macd.empty and not signal_line.empty:
-                    s = 1 if macd.iloc[-1] > signal_line.iloc[-1] else -1
-
-        # ATR_Breakout
-        elif strategy == "ATR_Breakout":
-            period = min(p.get("period", 14), len(prices_subset) - 1)
-            if period >= 1: # Ensure enough data for ATR calculation
-                tr = prices_subset.diff().abs()
-                atr = tr.rolling(window=period).mean()
-                if not atr.empty:
-                    high_band = prices_subset.rolling(window=period).max() + atr.iloc[-1] * p.get("multiplier", 1.5) # Use last ATR value
-                    low_band = prices_subset.rolling(window=period).min() - atr.iloc[-1] * p.get("multiplier", 1.5) # Use last ATR value
-                    if not high_band.empty and not low_band.empty and len(prices_subset) > 1:
-                        if prices_subset.iloc[-1] > high_band.shift(1).iloc[-1]: s = 1
-                        elif prices_subset.iloc[-1] < low_band.shift(1).iloc[-1]: s = -1
-
-        # ADX_Trend
-        elif strategy == "ADX_Trend":
-            period = min(p.get("period", 14), len(prices_subset))
-            if period >= 2: # Ensure enough data for ADX calculation
-                diff = prices_subset.diff()
-                up = diff.clip(lower=0)
-                down = (-diff).clip(lower=0)
-                avg_up = up.rolling(window=period).mean()
-                avg_down = down.rolling(window=period).mean()
-                if not avg_up.empty and not avg_down.empty:
-                    denom = avg_up.iloc[-1] + avg_down.iloc[-1] + 1e-9 # Use last values
-                    strength = abs(avg_up.iloc[-1] - avg_down.iloc[-1]) / denom
-                    min_strength = p.get("min_strength", 20) / 100
-                    dir_sig = 1 if prices_subset.iloc[-1] > prices_subset.rolling(window=period).mean().iloc[-1] else -1
-                    if strength > min_strength: s = dir_sig
-
-        # MeanReversion
-        elif strategy == "MeanReversion":
-            period = min(p.get("period", 20), len(prices_subset))
-            if period >= 2: # Ensure enough data for Mean Reversion calculation
-                rm = prices_subset.rolling(window=period).mean()
-                if not rm.empty:
-                    rz = prices_subset.iloc[-1] / rm.iloc[-1]
-                    if rz < p.get("buy_threshold", 0.99): s = 1
-                    elif rz > p.get("sell_threshold", 1.01): s = -1
-
-        # --- COMBINAISON AVEC TENDANCE LONG TERME ---
-        # Adjusted thresholds for long_var to be less strict
-        if long_var > 0.002 and short_var > 0: # Lowered threshold
-            s = max(s, 1)   # renforce les achats
-        elif long_var < -0.002 and short_var < 0: # Lowered threshold
-            s = min(s, -1)  # renforce les ventes
-
-        sig.iloc[-1] = s
-        return pd.Series([s] * len(prices), index=prices.index).ffill().fillna(0) # Return a series matching the original prices length
-
-    def enhanced_generate_signal(self, prices: pd.Series, strategy: str, indicators: dict = None, lookback_period: int = 30, min_price_variation_pct: float = 0.0001):
-        """
-        Version améliorée combinant le signal de base et un filtre RSI.
+        Retourne le signal scalaire final.
         """
         if prices is None or prices.empty or len(prices) < 2:
             return 0
 
-        # Pass min_price_variation_pct and lookback_period to generate_signal
-        base_signal_series = self.generate_signal(prices, strategy, lookback_period, min_price_variation_pct)
-        if base_signal_series is None or base_signal_series.empty:
+        signals = pd.Series(0, index=prices.index)
+
+        if len(prices) >= 2:
+            short_var = prices.pct_change().fillna(0)
+        else:
+            short_var = pd.Series(0, index=prices.index)
+
+        if len(prices) > 1:
+            long_var_val = (prices.iloc[-1] / prices.iloc[0] - 1) if prices.iloc[0] != 0 else 0.0
+        else:
+            long_var_val = 0.0
+
+        # Apply noise filter
+        signals[abs(short_var) < min_price_variation_pct] = 0
+
+        p = self.params.get(strategy, {})
+
+        # --- STRATEGY LOGIC (VECTORIZED) ---
+        if strategy == "MA_Original":
+            window = min(p.get("window", 5), len(prices))
+            if window >= 2:
+                ma = prices.rolling(window=window).mean()
+                signals[(prices > ma) & (signals != 0)] = 1
+                signals[(prices < ma) & (signals != 0)] = -1
+
+        elif strategy == "MA_Fast":
+            short_window = min(p.get("short_window", 3), len(prices))
+            long_window = min(p.get("long_window", 10), len(prices))
+            if short_window >= 2 and long_window >= 2:
+                if p.get("use_ema", True):
+                    short_ma = prices.ewm(span=short_window, adjust=False).mean()
+                    long_ma = prices.ewm(span=long_window, adjust=False).mean()
+                else:
+                    short_ma = prices.rolling(window=short_window).mean()
+                    long_ma = prices.rolling(window=long_window).mean()
+                signals[(short_ma > long_ma) & (signals != 0)] = 1
+                signals[(short_ma < long_ma) & (signals != 0)] = -1
+
+        elif strategy == "MA_Enhanced":
+            short_window = min(p.get("short_window", 5), len(prices))
+            long_window = min(p.get("long_window", 20), len(prices))
+            if short_window >= 2 and long_window >= 2:
+                vol_window = min(10, len(prices))
+                vol = prices.pct_change().rolling(window=vol_window).std().fillna(0)
+                short_ema = prices.ewm(span=short_window, adjust=False).mean()
+                long_ema = prices.ewm(span=long_window, adjust=False).mean()
+                volatility_threshold = p.get("volatility_threshold", 0.0003)
+
+                buy_condition = (vol > volatility_threshold) & (short_ema > long_ema)
+                sell_condition = (vol > volatility_threshold) & (short_ema < long_ema)
+                signals[buy_condition & (signals != 0)] = 1
+                signals[sell_condition & (signals != 0)] = -1
+
+        elif strategy == "Momentum_Enhanced":
+            period = min(p.get("period", 1), len(prices) - 1)
+            if period >= 1:
+                mom = prices.pct_change(period).fillna(0)
+                smoothing = min(p.get("smoothing", 1), len(mom) if not mom.empty else 0)
+                if smoothing > 1:
+                    mom = mom.rolling(window=smoothing).mean().fillna(0)
+                threshold = p.get("threshold", 0.2)
+                signals[(mom > threshold) & (signals != 0)] = 1
+                signals[(mom < -threshold) & (signals != 0)] = -1
+
+        elif strategy == "Breakout":
+            period = min(p.get("period", 5), len(prices) - 1)
+            if period >= 1:
+                res = prices.rolling(window=period).max().shift(1)
+                sup = prices.rolling(window=period).min().shift(1)
+                signals[(prices > res) & (signals != 0)] = 1
+                signals[(prices < sup) & (signals != 0)] = -1
+
+        elif strategy == "MACD":
+            fast = min(p.get("fast", 12), len(prices))
+            slow = min(p.get("slow", 26), len(prices))
+            signal_win = min(p.get("signal", 9), len(prices))
+            if fast >= 2 and slow >= 2 and signal_win >= 1:
+                exp1 = prices.ewm(span=fast, adjust=False).mean()
+                exp2 = prices.ewm(span=slow, adjust=False).mean()
+                macd = exp1 - exp2
+                signal_line = macd.ewm(span=signal_win, adjust=False).mean()
+                signals[(macd > signal_line) & (signals != 0)] = 1
+                signals[(macd < signal_line) & (signals != 0)] = -1
+
+        elif strategy == "ATR_Breakout":
+            period = min(p.get("period", 14), len(prices))
+            if period >= 1:
+                high_low = prices.diff().abs()
+                high_close = (prices - prices.shift(1)).abs()
+                low_close = (prices.shift(1) - prices).abs()
+                tr = pd.DataFrame({'hl': high_low, 'hc': high_close, 'lc': low_close}).max(axis=1)
+                atr = tr.rolling(window=period).mean().shift(1)
+
+                if not atr.empty and len(prices) > period:
+                    multiplier = p.get("multiplier", 1.5)
+                    high_band = prices.rolling(window=period).max().shift(1) + atr * multiplier
+                    low_band = prices.rolling(window=period).min().shift(1) - atr * multiplier
+                    signals[(prices > high_band) & (signals != 0) & ~high_band.isna()] = 1
+                    signals[(prices < low_band) & (signals != 0) & ~low_band.isna()] = -1
+
+        elif strategy == "ADX_Trend":
+            period = min(p.get("period", 14), len(prices))
+            if period >= 2:
+                plus_dm = (prices.diff().clip(lower=0)).ewm(com=period-1, adjust=False).mean()
+                minus_dm = (-prices.diff().clip(upper=0)).ewm(com=period-1, adjust=False).mean()
+                tr_adx = prices.diff().abs().ewm(com=period-1, adjust=False).mean()
+
+                plus_di = 100 * (plus_dm / (tr_adx + 1e-9))
+                minus_di = 100 * (minus_dm / (tr_adx + 1e-9))
+                dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-9))
+                adx = dx.ewm(com=period-1, adjust=False).mean()
+                min_strength = p.get("min_strength", 20)
+
+                ma_adx = prices.rolling(window=period).mean()
+                dir_sig = (prices > ma_adx).astype(int) - (prices < ma_adx).astype(int)
+
+                signals[(adx > min_strength) & (signals != 0)] = dir_sig[(adx > min_strength) & (signals != 0)]
+
+        elif strategy == "MeanReversion":
+            period = min(p.get("period", 20), len(prices))
+            if period >= 2:
+                rm = prices.rolling(window=period).mean()
+                buy_threshold = p.get("buy_threshold", 0.99)
+                sell_threshold = p.get("sell_threshold", 1.01)
+                rz = prices / (rm + 1e-9)
+                signals[(rz < buy_threshold) & (signals != 0)] = 1
+                signals[(rz > sell_threshold) & (signals != 0)] = -1
+
+        # Long-term trend reinforcement
+        last_signal = signals.iloc[-1] if not signals.empty else 0
+        if long_var_val > 0.002 and (short_var.iloc[-1] if not short_var.empty else 0) > 0:
+             signals.iloc[-1] = max(last_signal, 1)
+        elif long_var_val < -0.002 and (short_var.iloc[-1] if not short_var.empty else 0) < 0:
+             signals.iloc[-1] = min(last_signal, -1)
+
+        return signals.iloc[-1] if not signals.empty else 0
+
+
+    def enhanced_generate_signal(self, prices: pd.Series, strategy: str, indicators: dict = None, lookback_period: int = 30, min_price_variation_pct: float = 0.00005):
+        if prices is None or prices.empty or len(prices) < 5:
             return 0
 
-        # Dernier signal non nul
-        non_zero = base_signal_series[base_signal_series != 0]
-        signal_value = int(non_zero.iloc[-1]) if not non_zero.empty else 0
+        signal_value = self.generate_signal(prices, strategy, lookback_period, min_price_variation_pct)
 
-        # Filtre RSI si présent
         if indicators is not None:
             rsi = indicators.get("rsi")
             if rsi is not None:
@@ -470,39 +392,102 @@ class EnhancedParallelCryptoSimulatorCG:
 
         return signal_value
 
-    ##############################
-# Position sizing & trading
-##############################
     def calculate_position_size(self, strategy: str, cash: float) -> float:
-        """
-        Taille de position fixe selon le pourcentage maximal défini.
-        Plus agressive : minimum 20 % du capital par trade.
-        """
         pct = self.params.get(strategy, {}).get("max_position_pct", 0.2)
-        pct = max(0.2, pct)  # impose un plancher de 20 %
-        return min(cash * pct, cash * 0.95)  # pas plus de 95 % du cash
-
+        pct = max(0.2, pct)
+        return min(cash * pct, cash * 0.95)
 
     def calculate_dynamic_position_size(self, strategy: str, cash: float, current_volatility: float = None) -> float:
-        """
-        Taille de position dynamique : ajuste selon la volatilité.
-        Version agressive : augmente la taille si volatilité faible.
-        """
         base_pct = self.params.get(strategy, {}).get("max_position_pct", 0.15)
 
         if current_volatility is not None:
             if current_volatility < 0.01:
-                base_pct *= 1.5  # plus agressif si volatilité faible
+                base_pct *= 1.5
             elif current_volatility > 0.03:
-                base_pct *= 0.5  # réduit si trop volatile
+                base_pct *= 0.5
 
         return min(cash * base_pct, cash * 0.95)
 
+    def calculate_kelly_position_size(self, strategy: str, cash: float, trade_log: list) -> float:
+        """
+        Calculate position size based on the Kelly Criterion.
+        Requires trade history to estimate win rate and win/loss ratio.
+        """
+        if not trade_log:
+            return self.calculate_dynamic_position_size(strategy, cash) # Fallback to dynamic sizing if no trades
+
+        # Filter for executed trades (buys and sells)
+        executed_trades = [t for t in trade_log if t.get('action') in ['BUY', 'SELL', 'LIMIT_BUY_FILLED', 'TRAILING_STOP_TRIGGERED']]
+
+        if len(executed_trades) < 2:
+             return self.calculate_dynamic_position_size(strategy, cash) # Need at least one buy and one sell to estimate win/loss
+
+        # Calculate returns for executed trades (simplified: assumes buy/sell pairs)
+        trade_returns = []
+        buy_entry = None
+        for trade in executed_trades:
+            action = trade.get('action')
+            price = trade.get('price')
+            if action in ['BUY', 'LIMIT_BUY_FILLED']:
+                buy_entry = trade # Store the full trade dict for potential future use
+                buy_price = price
+            elif action in ['SELL', 'STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP_TRIGGERED'] and buy_price is not None:
+                # Ensure the sell is for the same coin as the last buy entry
+                if buy_entry and trade.get('coin') == buy_entry.get('coin'):
+                    # Calculate return for the completed trade
+                    trade_return = (price - buy_price) / buy_price
+                    trade_returns.append(trade_return)
+                    buy_price = None # Reset buy price after a sell
+                    buy_entry = None # Reset buy entry
+
+        if not trade_returns:
+            return self.calculate_dynamic_position_size(strategy, cash)
+
+        trade_returns_series = pd.Series(trade_returns)
+
+        # Calculate win rate (p)
+        winning_trades = trade_returns_series[trade_returns_series > 1e-9] # Consider return > 0 as a win
+        p = len(winning_trades) / len(trade_returns_series) if len(trade_returns_series) > 0 else 0.0
+
+        # Calculate average win (W) and average loss (L)
+        average_win = winning_trades.mean() if not winning_trades.empty else 0.0
+        losing_trades = trade_returns_series[trade_returns_series <= 1e-9] # Including zero returns as non-wins/losses
+        average_loss = abs(losing_trades.mean()) if not losing_trades.empty else 0.0 # Use absolute value
+
+        # Avoid division by zero for win/loss ratio
+        win_loss_ratio = average_win / average_loss if average_loss > 1e-9 else 0.0
+
+        # Calculate Kelly fraction (f)
+        # Kelly formula: f = p - (1-p) / (W/L)
+        # Ensure W/L is not zero or very small
+        if win_loss_ratio < 1e-9:
+             kelly_fraction = 0.0
+        else:
+             kelly_fraction = p - (1 - p) / win_loss_ratio
+
+        # Apply a fraction of Kelly (e.g., half Kelly) to reduce risk
+        kelly_fraction = max(0.0, kelly_fraction * 0.5) # Ensure fraction is non-negative and use half Kelly
+
+        # Calculate position size as a fraction of current cash
+        position_size_pct = kelly_fraction
+
+        # Ensure position size is within reasonable bounds (e.g., not more than 10% of cash for any single trade)
+        # This is a practical constraint to avoid over-betting even if Kelly suggests a large fraction
+        max_single_trade_pct = self.params.get(strategy, {}).get("max_position_pct", 0.15) # Use strategy's max_position_pct as an upper bound
+        position_size_pct = min(position_size_pct, max_single_trade_pct)
+
+        # Also ensure a minimum position size to make trades worthwhile
+        min_trade_value_pct = 0.005 # Example: minimum trade value is 0.5% of cash
+        if kelly_fraction > 0 and position_size_pct < min_trade_value_pct:
+             position_size_pct = min_trade_value_pct
+
+
+        # Ensure position size doesn't exceed available cash (minus a small buffer)
+        return min(cash * position_size_pct, cash * 0.95)
+
+
 
     def calculate_portfolio_volatility(self, portfolio_history: list) -> float:
-        """
-        Calculer la volatilité du portefeuille sur les dernières périodes.
-        """
         if portfolio_history is None or len(portfolio_history) < 5:
             return 0.0
 
@@ -513,43 +498,184 @@ class EnhancedParallelCryptoSimulatorCG:
         returns = [(values[i] - values[i-1]) / values[i-1] for i in range(1, len(values))]
         return float(np.std(returns)) if returns else 0.0
 
-
-    def calculate_win_rate(self, trade_log: list, entry_prices: dict = None, current_prices: dict = None) -> float:
-        """
-        Calcul du win rate basé sur les trades effectués.
-        """
+    def calculate_win_rate(self, trade_log: list) -> float:
         if not trade_log:
             return 0.0
 
-        buy_trades = [t for t in trade_log if t.get('action') in ['BUY', 'LIMIT_BUY_FILLED']]
-        total = len([t for t in trade_log if t.get('action') in [
-            'BUY', 'SELL', 'STOP_LOSS', 'TAKE_PROFIT', 'LIMIT_BUY_FILLED', 'TRAILING_STOP_TRIGGERED'
-        ]])
-        return len(buy_trades) / total if total > 0 else 0.0
+        completed_trades = []
+        buy_entry = None
+        for trade in trade_log:
+            action = trade.get('action')
+            if action in ['BUY', 'LIMIT_BUY_FILLED']:
+                buy_entry = trade
+            elif action in ['SELL', 'STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP_TRIGGERED'] and buy_entry is not None:
+                if trade.get('coin') == buy_entry.get('coin'): # Ensure it's a sell for the same coin
+                    completed_trades.append({'buy': buy_entry, 'sell': trade})
+                    buy_entry = None
+
+        if not completed_trades:
+            return 0.0
+
+        winning_trades = 0
+        for trade_pair in completed_trades:
+            buy_price = trade_pair['buy'].get('price', 0)
+            sell_price = trade_pair['sell'].get('price', 0)
+            # Consider a win if sell price is strictly greater than buy price
+            if sell_price > buy_price + (buy_price * self.transaction_cost * 2): # Account for transaction costs
+                winning_trades += 1
+
+        total_completed_trades = len(completed_trades)
+        return winning_trades / total_completed_trades if total_completed_trades > 0 else 0.0
 
 
     def calculate_limit_buy_price(self, prices: pd.Series, strategy_params: dict) -> float or None:
-        """
-        Détermine le prix limite d’achat selon un offset plus agressif.
-        """
-        limit_offset_pct = strategy_params.get("limit_buy_offset_pct", -0.002)  # -0.2 % par défaut
+        limit_offset_pct = strategy_params.get("limit_buy_offset_pct", -0.002)
         if prices is not None and not prices.empty:
             return prices.iloc[-1] * (1 + limit_offset_pct)
         return None
 
-
     def calculate_trailing_stop_price(self, peak_price: float, trailing_pct: float) -> float:
-        """
-        Calcul du prix de stop suiveur (trailing stop).
-        Version agressive : trailing plus serré.
-        """
-        trailing_pct = max(trailing_pct * 0.7, 0.005)  # réduit de 30 %
+        trailing_pct = max(trailing_pct * 0.7, 0.005)
         return peak_price * (1 - trailing_pct)
 
+    def calculate_var_es(self, portfolio_history: list, confidence_level=0.99):
+        """
+        Calculate Value at Risk (VaR) and Expected Shortfall (ES).
+        portfolio_history: list of dicts with 'value' key.
+        confidence_level: e.g., 0.99 for 99% confidence.
+        Returns a dict with 'VaR' and 'ES'.
+        """
+        if not portfolio_history or len(portfolio_history) < 2:
+            return {'VaR': 0.0, 'ES': 0.0}
 
-    ##############################
-    # Run a single strategy
-    ##############################
+        # Extract portfolio values and calculate returns
+        values = [p.get('value', 0) for p in portfolio_history if 'value' in p]
+        if len(values) < 2:
+             return {'VaR': 0.0, 'ES': 0.0}
+
+        returns = pd.Series(values).pct_change().dropna()
+
+        if returns.empty:
+             return {'VaR': 0.0, 'ES': 0.0}
+
+        # Calculate VaR (Historical Method)
+        # Sort returns and find the return at the desired percentile
+        sorted_returns = returns.sort_values(ascending=True)
+        var_index = int(len(sorted_returns) * (1 - confidence_level))
+        # Ensure index is within bounds
+        var_index = max(0, min(var_index, len(sorted_returns) - 1))
+
+        # VaR is the negative of the return at the VaR index
+        var = -sorted_returns.iloc[var_index]
+
+        # Calculate Expected Shortfall (ES)
+        # ES is the average of returns below the VaR return
+        es_returns = sorted_returns[sorted_returns <= -var] # Returns equal to or worse than VaR
+        es = -es_returns.mean() if not es_returns.empty else 0.0
+
+        return {'VaR': var, 'ES': es}
+
+    def calculate_covariance_matrix(self, historical_prices_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculates the covariance matrix of cryptocurrency returns.
+
+        Args:
+            historical_prices_df: DataFrame of historical prices with time index and coin columns.
+
+        Returns:
+            The covariance matrix of returns.
+        """
+        if historical_prices_df is None or historical_prices_df.empty:
+            return pd.DataFrame()
+
+        returns_df = historical_prices_df.pct_change().dropna()
+        covariance_matrix = returns_df.cov()
+
+        return covariance_matrix
+
+    def calculate_risk_parity_weights(self, cov_matrix: pd.DataFrame, coins: list) -> pd.Series:
+        """
+        Calculates risk-parity weights for a portfolio of assets.
+
+        Args:
+            cov_matrix: The covariance matrix of asset returns (pandas DataFrame).
+            coins: A list of asset symbols (strings) corresponding to the columns/index of the covariance matrix.
+
+        Returns:
+            A pandas Series where keys are coin symbols and values are their risk-parity weights.
+            Returns equal weights if optimization fails or covariance matrix is invalid.
+        """
+        num_assets = len(coins)
+        if cov_matrix.empty or cov_matrix.shape != (num_assets, num_assets):
+            print("⚠️ Invalid covariance matrix for risk parity, returning equal weights.")
+            return pd.Series(1.0 / num_assets, index=coins)
+
+        # Ensure the covariance matrix columns match the coins list
+        try:
+            cov_matrix = cov_matrix.loc[coins, coins]
+        except KeyError:
+             print("⚠️ Covariance matrix columns do not match coin list, returning equal weights.")
+             return pd.Series(1.0 / num_assets, index=coins)
+
+
+        # Objective function for Risk Parity: minimize the sum of squared differences between risk contributions
+        # We want each asset's risk contribution to be equal, so we minimize the difference
+        # between the actual risk contribution and the average risk contribution.
+        def risk_contribution_objective(weights, covariance_matrix):
+            # Portfolio variance
+            portfolio_variance = np.dot(weights.T, np.dot(covariance_matrix, weights))
+            # Handle potential division by zero or very small variance
+            if portfolio_variance < 1e-9:
+                 return np.sum(weights**2) # Return sum of squared weights if variance is zero or near zero
+
+            # Portfolio volatility
+            portfolio_volatility = np.sqrt(portfolio_variance)
+
+            # Marginal Contribution to Risk (MCR)
+            # MCR_i = (Cov * weights)_i / portfolio_volatility
+            mcr = np.dot(covariance_matrix, weights) / portfolio_volatility
+
+            # Asset Contribution to Risk (ACR)
+            # ACR_i = weights_i * MCR_i
+            acr = weights * mcr
+
+            # We want ACR_i to be equal for all i.
+            # Objective: minimize the sum of squared differences between ACR_i and the average ACR
+            average_acr = np.mean(acr)
+            objective = np.sum((acr - average_acr)**2)
+            return objective
+
+
+        # Constraints:
+        # 1. Weights must sum to 1
+        constraints = ({'type': 'eq', 'fun': lambda weights: np.sum(weights) - 1})
+
+        # Bounds:
+        # Weights must be non-negative (no shorting)
+        bounds = tuple((0, 1) for _ in range(num_assets))
+
+        # Initial guess: equal weights
+        initial_weights = np.array([1.0 / num_assets] * num_assets)
+
+        # Perform the optimization
+        try:
+            result = sco.minimize(risk_contribution_objective, initial_weights, args=(cov_matrix,),
+                                  method='SLSQP', bounds=bounds, constraints=constraints)
+
+            if result.success:
+                optimized_weights = pd.Series(result.x, index=coins)
+                # Normalize weights to sum to 1 in case of minor numerical inaccuracies
+                optimized_weights /= optimized_weights.sum()
+                return optimized_weights
+            else:
+                print(f"⚠️ Risk parity optimization failed: {result.message}, returning equal weights.")
+                return pd.Series(1.0 / num_assets, index=coins)
+
+        except Exception as e:
+            print(f"❌ Error during risk parity optimization: {e}, returning equal weights.")
+            return pd.Series(1.0 / num_assets, index=coins)
+
+
     def run_single_strategy(self, coins, strategy, duration_minutes=2, lookback_period=30):
         cash = self.starting_cash
         holdings = {coin: 0.0 for coin in coins}
@@ -558,64 +684,42 @@ class EnhancedParallelCryptoSimulatorCG:
         trade_log = []
         end_time = datetime.now() + timedelta(minutes=duration_minutes)
 
-        # Initialize order management dictionaries
         open_orders = {coin: [] for coin in coins}
-        # trailing_stops structure: {coin: {'stop_price': price, 'trailing_pct': pct, 'peak_price': price}}
         trailing_stops = {coin: None for coin in coins}
 
-
         consecutive_losses = 0
-        max_consecutive_losses = 3
 
-        # Dictionary to store recent signals for confirmation
-        recent_signals = {coin: [] for coin in coins}
-        confirmation_periods = self.params.get(strategy, {}).get("confirmation_periods", 1)
-        # Get timeframes for multi-timeframe analysis
-        strategy_timeframes = self.params.get(strategy, {}).get("timeframes", ['1m']) # Default to 1m if not specified
+        strategy_params = self.params.get(strategy, {})
+        strategy_timeframes = strategy_params.get("timeframes", ['1m'])
+        min_price_variation_pct = strategy_params.get("min_price_variation_pct", 0.00005)
 
-
-        # Assure que self.is_running vaut True (sinon la boucle ne tourne pas)
-        self.is_running = True
-
-        # Get min_price_variation_pct for the current strategy
-        min_price_variation_pct = self.params.get(strategy, {}).get("min_price_variation_pct", 0.001) # Corrected parameter name
+        peak_portfolio_value = self.starting_cash # Track peak portfolio value for drawdown calculation
 
 
-        while datetime.now() < end_time and self.is_running:
+        # The main simulation loop within the single strategy run
+        while datetime.now() < end_time:
             prices = self.get_current_prices()
-            # Si trop peu de données disponibles, attendre
-            if not prices: # Added None check
+            if prices is None or len(prices) < len(coins) // 2:
                 time.sleep(1)
                 continue
 
             current_signals = {}
-            indicators_dict = {}
-            multi_timeframe_signals = {} # Store signals for each timeframe and coin
 
-            # Process open orders (check if limit buys can be filled)
+            # Process limit orders
             orders_to_execute = []
             for coin in coins:
                 if coin in prices:
                     current_price = prices[coin]
-                    # Iterate through a copy of the list to allow modification
-                    # Create a list of indices to remove after iteration
                     indices_to_remove = []
                     for i, order in enumerate(open_orders.get(coin, [])):
                         if order['type'] == 'LIMIT_BUY' and current_price <= order['price']:
-                            # Limit buy condition met
                             orders_to_execute.append((coin, order))
                             indices_to_remove.append(i)
-
-                    # Remove executed orders from the open_orders list for this coin
-                    # Iterate in reverse to avoid index issues
                     for i in sorted(indices_to_remove, reverse=True):
                         del open_orders[coin][i]
 
-
             # Execute filled orders
-            executed_buy_coins = set()
             for coin, order in orders_to_execute:
-                # Ensure we only execute the order if we don't currently hold the coin
                 if holdings.get(coin, 0) == 0:
                     amount_to_buy = order['amount']
                     cost = amount_to_buy * order['price'] * (1 + self.transaction_cost)
@@ -623,7 +727,7 @@ class EnhancedParallelCryptoSimulatorCG:
                     if cash >= cost:
                         holdings[coin] += amount_to_buy
                         cash -= cost
-                        entry_prices[coin] = order['price'] # Entry price is the limit order price
+                        entry_prices[coin] = order['price']
                         trade_log.append({
                             'timestamp': datetime.now(),
                             'action': 'LIMIT_BUY_FILLED',
@@ -632,46 +736,35 @@ class EnhancedParallelCryptoSimulatorCG:
                             'price': order['price']
                         })
                         print(f"✅ [{strategy}] LIMIT BUY FILLED {coin}: {amount_to_buy:.4f} at ${order['price']:.2f}")
-                        executed_buy_coins.add(coin) # Mark this coin as bought via limit order
 
-                        # Place a trailing stop after a position is opened via limit order
-                        strategy_params = self.params.get(strategy, {})
                         trailing_stop_pct = strategy_params.get("trailing_stop_pct")
                         if trailing_stop_pct is not None:
-                             trailing_stops[coin] = {
-                                 'stop_price': entry_prices[coin] * (1 - trailing_stop_pct),
-                                 'trailing_pct': trailing_stop_pct,
-                                 'peak_price': entry_prices[coin] # Initialize peak price at entry
-                             }
-                             print(f"🅿️ [{strategy}] PLACED TRAILING STOP for {coin} at ${trailing_stops[coin]['stop_price']:.2f} (Initial Peak: ${trailing_stops[coin]['peak_price']:.2f})")
+                            trailing_stops[coin] = {
+                                'stop_price': entry_prices[coin] * (1 - trailing_stop_pct),
+                                'trailing_pct': trailing_stop_pct,
+                                'peak_price': entry_prices[coin]
+                            }
 
-
-            # Process Trailing Stops
+            # Process trailing stops
             stops_to_trigger = []
             for coin in coins:
                 if holdings.get(coin, 0) > 0 and coin in prices and trailing_stops.get(coin) is not None:
                     current_price = prices[coin]
                     stop_info = trailing_stops[coin]
-                    peak_price = stop_info.get('peak_price', current_price) # Get tracked peak price, default to current
+                    peak_price = stop_info.get('peak_price', current_price)
 
-                    # Update peak price if current price is higher
                     if current_price > peak_price:
                         stop_info['peak_price'] = current_price
-                        # Update the stop price based on the new peak
-                        new_stop_price = self.calculate_trailing_stop_price(stop_info['peak_price'], stop_info['trailing_pct'])
-                        if new_stop_price > stop_info['stop_price']: # Only move stop up
+                        new_stop_price = peak_price * (1 - stop_info['trailing_pct'])
+                        if new_stop_price > stop_info['stop_price']:
                             stop_info['stop_price'] = new_stop_price
-                            print(f"⬆️ [{strategy}] Trailing stop for {coin} moved up to ${stop_info['stop_price']:.2f} (New Peak: ${stop_info['peak_price']:.2f})")
 
-
-                    # Check if current price has fallen below the trailing stop price
                     if current_price <= stop_info['stop_price']:
                         stops_to_trigger.append(coin)
 
-
-            # Execute triggered trailing stops
+            # Execute trailing stops
             for coin in stops_to_trigger:
-                 if holdings.get(coin, 0) > 0 and coin in prices: # Ensure we still hold the coin
+                if holdings.get(coin, 0) > 0 and coin in prices:
                     current_price = prices[coin]
                     cash += holdings[coin] * current_price * (1 - self.transaction_cost)
                     trade_log.append({
@@ -682,67 +775,45 @@ class EnhancedParallelCryptoSimulatorCG:
                         'price': current_price,
                         'stop_price': trailing_stops[coin]['stop_price']
                     })
-                    print(f"🛑 [{strategy}] TRAILING STOP TRIGGERED {coin} at ${current_price:.2f} (Stop: ${trailing_stops[coin]['stop_price']:.2f})")
+                    print(f"🛑 [{strategy}] TRAILING STOP TRIGGERED {coin} at ${current_price:.2f}")
                     holdings[coin] = 0
                     entry_prices.pop(coin, None)
-                    trailing_stops.pop(coin, None) # Remove the trailing stop
-                    consecutive_losses += 1 # Consider a triggered stop as a loss for consecutive loss tracking
-                    recent_signals[coin] = [] # Clear recent signals after selling
+                    trailing_stops.pop(coin, None)
+                    consecutive_losses += 1
+
+            # Generate signals in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(coins)) as executor:
+                future_to_coin = {}
+                for coin in coins:
+                    if coin in prices:
+                        future_to_coin[executor.submit(self._calculate_signals_for_coin, coin, prices, strategy, lookback_period, min_price_variation_pct, strategy_timeframes)] = coin
+
+                for future in concurrent.futures.as_completed(future_to_coin):
+                    coin = future_to_coin[future]
+                    try:
+                        current_signals[coin] = future.result()
+                    except Exception as e:
+                        print(f"❌ Error calculating signals for {coin} in strategy {strategy}: {e}")
+                        current_signals[coin] = 0 # Default to no signal on error
 
 
-            # Calculate signals for each timeframe
-            for coin in coins:
-                if coin in prices:
-                    multi_timeframe_signals[coin] = {}
-                    for timeframe in strategy_timeframes:
-                        ph = self.get_price_history(coin, timeframe=timeframe)
-                        indicators = self.calculate_technical_indicators(ph, strategy, lookback_period)
-                        # Use enhanced_generate_signal for each timeframe
-                        signal = self.enhanced_generate_signal(ph, strategy, indicators, lookback_period, min_price_variation_pct)
-                        multi_timeframe_signals[coin][timeframe] = signal
-
-                    # Determine the final signal based on multi-timeframe confirmation
-                    # A signal is confirmed if it appears on the largest timeframe
-                    final_signal = 0
-                    if strategy_timeframes:
-                        largest_timeframe = strategy_timeframes[-1]
-                        final_signal = multi_timeframe_signals[coin].get(largest_timeframe, 0)
-
-                    current_signals[coin] = final_signal # Use the confirmed signal
-
-            # Add logging for current signals - Moved outside the timeframe loop
-            # This logs the FINAL confirmed signal for each coin in this timestep
+            # Add logging for current signals
             if current_signals:
                  print(f"[{strategy}] Signals at {datetime.now().strftime('%H:%M:%S')}: {current_signals}")
 
 
-            # Calcul de la volatilité du portefeuille actuel
             current_volatility = self.calculate_portfolio_volatility(portfolio_history)
 
-            # LOGIQUE DE VENTE — stop loss and take profit already handled
-            # This is now primarily for placing new orders or market sells based on signals
-
-
-            # Si plusieurs pertes consécutives, ralentir l’activité
-            if consecutive_losses >= max_consecutive_losses:
-                time.sleep(self.update_interval * 2)
-                continue
-
-            # Place New Orders / Execute Market Orders
+            # Execute trades based on signals
             for coin in coins:
                 if coin in current_signals and coin in prices:
                     sig = current_signals[coin]
-                    current_price = prices[coin] # Get current price again for clarity
+                    current_price = prices[coin]
                     strategy_params = self.params.get(strategy, {})
 
-                    # Action based on the confirmed signal (sig)
-                    # Vente standard (Market Sell) - Only sell if currently holding the coin and no open sell orders (though we don't have sell orders yet)
-                    # Also, don't sell if a trailing stop was just triggered for this coin in this time step
+                    # Sell logic
                     if sig < 0 and holdings.get(coin, 0) > 0 and coin not in stops_to_trigger:
-                         # Check if there are any open buy orders for this coin, cancel them before selling
-                        if coin in open_orders and open_orders[coin]:
-                            print(f"Cancelling {len(open_orders[coin])} open orders for {coin} before selling.")
-                            # Add cancellation to trade log
+                        if open_orders.get(coin):
                             for order in open_orders[coin]:
                                 trade_log.append({
                                     'timestamp': datetime.now(),
@@ -751,19 +822,16 @@ class EnhancedParallelCryptoSimulatorCG:
                                     'amount': order['amount'],
                                     'price': order['price']
                                 })
-                            open_orders[coin] = [] # Cancel all open orders for this coin
+                            open_orders[coin] = []
 
-                        # Cancel any active trailing stop for this position before selling
-                        if coin in trailing_stops and trailing_stops[coin] is not None:
-                            print(f"Cancelling trailing stop for {coin} before selling.")
+                        if trailing_stops.get(coin):
                             trade_log.append({
-                                 'timestamp': datetime.now(),
-                                 'action': 'CANCELLED_TRAILING_STOP_BEFORE_SELL',
-                                 'coin': coin,
-                                 'stop_price': trailing_stops[coin]['stop_price']
-                             })
+                                'timestamp': datetime.now(),
+                                'action': 'CANCELLED_TRAILING_STOP_BEFORE_SELL',
+                                'coin': coin,
+                                'stop_price': trailing_stops[coin]['stop_price']
+                            })
                             trailing_stops[coin] = None
-
 
                         cash += holdings[coin] * current_price * (1 - self.transaction_cost)
                         trade_log.append({
@@ -776,69 +844,60 @@ class EnhancedParallelCryptoSimulatorCG:
                         print(f"🔴 [{strategy}] SELL {coin}: {holdings[coin]:.4f} at ${current_price:.2f}")
                         holdings[coin] = 0
                         entry_prices.pop(coin, None)
-                        recent_signals[coin] = [] # Clear recent signals after selling
 
-
-                    # Logique d’achat — signal positif
-                    # Only place a new buy order if not already holding the coin AND no open orders for this coin
-                    elif sig > 0 and cash > 10 and holdings.get(coin, 0) == 0 and not open_orders.get(coin): # Added check for open orders
-                         if cash < 1:
+                    # Buy logic
+                    elif sig > 0 and cash > 10 and holdings.get(coin, 0) == 0 and not open_orders.get(coin):
+                        if cash < 1:
                             break
 
-                         size = self.calculate_dynamic_position_size(strategy, cash, current_volatility)
-                         amount = size / current_price # Calculate amount based on current price for size calculation
+                        # Use Kelly Criterion for position sizing
+                        size = self.calculate_kelly_position_size(strategy, cash, trade_log)
 
-                         # Check for Limit Buy support and calculate limit price
-                         limit_buy_price = self.calculate_limit_buy_price(self.get_price_history(coin), strategy_params)
+                        # If Kelly size is too small or zero, potentially use dynamic or fixed size
+                        if size < cash * 0.01: # Example threshold: if Kelly size is less than 1% of cash
+                            # Decide on a fallback: dynamic, fixed, or skip trade
+                            size = self.calculate_dynamic_position_size(strategy, cash, current_volatility) # Fallback to dynamic sizing
 
-                         if limit_buy_price is not None:
-                             # Place a Limit Buy Order
-                             open_orders[coin].append({
-                                 'type': 'LIMIT_BUY',
-                                 'coin': coin,
-                                 'price': limit_buy_price,
-                                 'amount': amount,
-                                 'timestamp': datetime.now()
-                             })
-                             print(f"🅿️ [{strategy}] PLACING LIMIT BUY {coin}: {amount:.4f} at ${limit_buy_price:.2f}")
-                             recent_signals[coin] = [] # Clear recent signals after placing order
 
-                         else:
-                             # Execute a Market Buy (original logic) - Only if no limit buy was placed
-                             # Limite du nombre de positions ouvertes
-                             current_positions = sum(1 for h in holdings.values() if h > 0)
-                             if current_positions >= 5:
+                        amount = size / current_price
+
+                        limit_buy_price = current_price * (1 + strategy_params.get("limit_buy_offset_pct", -0.002))
+
+                        if strategy_params.get("limit_buy_offset_pct") is not None:
+                            open_orders[coin].append({
+                                'type': 'LIMIT_BUY',
+                                'coin': coin,
+                                'price': limit_buy_price,
+                                'amount': amount,
+                                'timestamp': datetime.now()
+                            })
+                            print(f"🅿️ [{strategy}] PLACING LIMIT BUY {coin}: {amount:.4f} at ${limit_buy_price:.2f}")
+                        else:
+                            current_positions = sum(1 for h in holdings.values() if h > 0)
+                            if current_positions >= 5:
                                 break
 
-                             # Recalculate amount based on current price for market buy execution
-                             amount = size / current_price
+                            holdings[coin] += amount
+                            cash -= size
+                            entry_prices[coin] = current_price
+                            trade_log.append({
+                                'timestamp': datetime.now(),
+                                'action': 'BUY',
+                                'coin': coin,
+                                'amount': amount,
+                                'price': current_price
+                            })
+                            print(f"🟢 [{strategy}] BUY {coin}: {amount:.4f} at ${current_price:.2f}")
 
-                             holdings[coin] += amount
-                             cash -= size
-                             entry_prices[coin] = current_price
-                             trade_log.append({
-                                 'timestamp': datetime.now(),
-                                 'action': 'BUY',
-                                 'coin': coin,
-                                 'amount': amount,
-                                 'price': current_price
-                             })
-                             print(f"🟢 [{strategy}] BUY {coin}: {amount:.4f} at ${current_price:.2f}")
-                             recent_signals[coin] = [] # Clear recent signals after buying
+                            trailing_stop_pct = strategy_params.get("trailing_stop_pct")
+                            if trailing_stop_pct is not None:
+                                trailing_stops[coin] = {
+                                    'stop_price': current_price * (1 - trailing_stop_pct),
+                                    'trailing_pct': trailing_stop_pct,
+                                    'peak_price': current_price
+                                }
 
-                             # Place a trailing stop after a market buy
-                             strategy_params = self.params.get(strategy, {})
-                             trailing_stop_pct = strategy_params.get("trailing_stop_pct")
-                             if trailing_stop_pct is not None:
-                                 trailing_stops[coin] = {
-                                     'stop_price': entry_prices[coin] * (1 - trailing_stop_pct),
-                                     'trailing_pct': trailing_stop_pct,
-                                     'peak_price': entry_prices[coin] # Initialize peak price at entry
-                                 }
-                                 print(f"🅿️ [{strategy}] PLACED TRAILING STOP for {coin} at ${trailing_stops[coin]['stop_price']:.2f} (Initial Peak: ${trailing_stops[coin]['peak_price']:.2f})")
-
-
-            # Calcul de la valeur du portefeuille
+            # Update portfolio value
             port_value = cash + sum(holdings.get(c, 0) * prices.get(c, 0) for c in coins)
             portfolio_history.append({
                 'timestamp': datetime.now(),
@@ -847,118 +906,115 @@ class EnhancedParallelCryptoSimulatorCG:
                 'holdings_value': port_value - cash
             })
 
-            # Add open orders and trailing stops to trade log for tracking (optional, for debugging/analysis)
-            # for coin, orders in open_orders.items():
-            #     for order in orders:
-            #          trade_log.append({
-            #              'timestamp': datetime.now(),
-            #              'action': f"OPEN_{order['type']}",
-            #              'coin': order['coin'],
-            #              'amount': order['amount'],
-            #              'price': order['price'],
-            #              'order_time': order['timestamp']
-            #          })
-            # for coin, stop_info in trailing_stops.items():
-            #      if stop_info:
-            #          trade_log.append({
-            #              'timestamp': datetime.now(),
-            #              'action': 'OPEN_TRAILING_STOP',
-            #              'coin': coin,
-            #              'stop_price': stop_info['stop_price'],
-            #              'peak_price': stop_info['peak_price']
-            #          })
+            # Update peak portfolio value and check for drawdown
+            peak_portfolio_value = max(peak_portfolio_value, port_value)
+            if port_value < peak_portfolio_value * (1 - self.max_drawdown_pct):
+                 print(f"💥 [{strategy}] Maximum drawdown ({self.max_drawdown_pct*100:.1f}%) reached at {datetime.now().strftime('%H:%M:%S')}. Stopping simulation for this strategy.")
+                 # Add a log entry for the stop
+                 trade_log.append({
+                     'timestamp': datetime.now(),
+                     'action': 'MAX_DRAWDOWN_STOP',
+                     'coin': 'PORTFOLIO', # Indicate portfolio level stop
+                     'amount': port_value, # Log the value at stop
+                     'price': peak_portfolio_value # Log the peak value
+                 })
+                 break # Exit the simulation loop for this strategy
 
 
             time.sleep(self.update_interval)
 
-        # At the end of the simulation, cancel any remaining open orders and trailing stops
+        # Clean up remaining orders (if simulation stopped due to drawdown or end time)
         for coin in coins:
-             if coin in open_orders and open_orders[coin]:
-                 print(f"Cancelling {len(open_orders[coin])} remaining open orders for {coin} at end of simulation.")
-                 for order in open_orders[coin]:
-                      trade_log.append({
-                          'timestamp': datetime.now(),
-                          'action': f"CANCELLED_{order['type']}",
-                          'coin': order['coin'],
-                          'amount': order['amount'],
-                          'price': order['price'], # Price at time of order placement
-                          'cancel_price': prices.get(coin, order['price']) # Price at time of cancellation
-                      })
-                 open_orders[coin] = [] # Clear the list of open orders
+            if open_orders.get(coin):
+                for order in open_orders[coin]:
+                    trade_log.append({
+                        'timestamp': datetime.now(),
+                        'action': f"CANCELLED_{order['type']}",
+                        'coin': order['coin'],
+                        'amount': order['amount'],
+                        'price': order['price']
+                    })
+                open_orders[coin] = []
 
-             if coin in trailing_stops and trailing_stops[coin] is not None:
-                 print(f"Cancelling remaining trailing stop for {coin} at end of simulation.")
-                 trade_log.append({
-                      'timestamp': datetime.now(),
-                      'action': 'CANCELLED_TRAILING_STOP',
-                      'coin': coin,
-                      'stop_price': trailing_stops[coin]['stop_price'],
-                      'cancel_price': prices.get(coin, trailing_stops[coin]['stop_price']) # Price at time of cancellation
-                  })
-                 trailing_stops[coin] = None
+            if trailing_stops.get(coin):
+                trade_log.append({
+                    'timestamp': datetime.now(),
+                    'action': 'CANCELLED_TRAILING_STOP',
+                    'coin': coin,
+                    'stop_price': trailing_stops[coin]['stop_price']
+                })
+                trailing_stops[coin] = None
 
+        # Calculate VaR and ES at the end of the simulation
+        risk_metrics = self.calculate_var_es(portfolio_history)
 
-        # Résultat final
         final_value = portfolio_history[-1]['value'] if portfolio_history else self.starting_cash
         result = {
             'Strategy': strategy,
             'Final Value': final_value,
             'Return': (final_value - self.starting_cash) / self.starting_cash * 100,
-            'Trades': len([t for t in trade_log if t['action'] in ['BUY', 'SELL', 'STOP_LOSS', 'TAKE_PROFIT', 'LIMIT_BUY_FILLED', 'TRAILING_STOP_TRIGGERED']]), # Count actual trades
-            'Win Rate': self.calculate_win_rate([t for t in trade_log if t['action'] in ['BUY', 'LIMIT_BUY_FILLED']]) # Calculate win rate based on filled buys
+            'Trades': len([t for t in trade_log if t['action'] in ['BUY', 'SELL', 'STOP_LOSS', 'TAKE_PROFIT', 'LIMIT_BUY_FILLED', 'TRAILING_STOP_TRIGGERED']]),
+            'Win Rate': self.calculate_win_rate(trade_log),
+            'VaR (99%)': risk_metrics['VaR'],
+            'ES (99%)': risk_metrics['ES'],
+            'Max Drawdown (%)': (1 - (min([p.get('value', self.starting_cash) for p in portfolio_history] + [self.starting_cash]) / max([p.get('value', self.starting_cash) for p in portfolio_history] + [self.starting_cash]))) * 100 # Calculate actual max drawdown
         }
         return result, portfolio_history, trade_log
 
-    ##############################
-    # Run all strategies in parallel
-    ##############################
+    def _calculate_signals_for_coin(self, coin, prices, strategy, lookback_period, min_price_variation_pct, strategy_timeframes):
+         """Helper function to calculate signals for a single coin across timeframes."""
+         multi_timeframe_signals = {}
+         for timeframe in strategy_timeframes:
+             ph = self.get_price_history(coin, timeframe=timeframe)
+             indicators = self.calculate_technical_indicators(ph, strategy, lookback_period)
+             signal = self.enhanced_generate_signal(ph, strategy, indicators, lookback_period, min_price_variation_pct)
+             multi_timeframe_signals[timeframe] = signal
+
+         # Determine the final signal based on multi-timeframe confirmation
+         final_signal = 0
+         if strategy_timeframes:
+             largest_timeframe = strategy_timeframes[-1]
+             final_signal = multi_timeframe_signals.get(largest_timeframe, 0)
+
+         return final_signal
+
+
     def run_parallel_strategies(self, coins, strategies, duration_minutes=2, lookback_period=30):
-        # Démarrer la collecte des prix en arrière-plan
         self.start_real_time_data(coins)
-        # attendre un peu pour que les premières données arrivent
         time.sleep(5)
 
         results_all = {}
-        threads = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(strategies)) as executor:
+            future_to_strategy = {executor.submit(self.run_single_strategy, coins, strat, duration_minutes, lookback_period): strat for strat in strategies}
 
-        # fonction “worker” pour chaque stratégie
-        def worker(strategy_name):
-            try:
-                res, ph, log = self.run_single_strategy(coins, strategy_name, duration_minutes, lookback_period)
-            except Exception as e:
-                print(f"❌ Error running strategy {strategy_name}: {e}")
-                import traceback
-                traceback.print_exc()
-                # en cas d’erreur, on stocke un résultat partiel vide
-                res, ph, log = None, [], []
-            results_all[strategy_name] = {
-                'results': res,
-                'portfolio_history': ph,
-                'trade_log': log
-            }
+            for future in concurrent.futures.as_completed(future_to_strategy):
+                strat = future_to_strategy[future]
+                try:
+                    res, ph, log = future.result()
+                    results_all[strat] = {
+                        'results': res,
+                        'portfolio_history': ph,
+                        'trade_log': log
+                    }
+                    print(f"✅ Strategy {strat} completed.")
+                except Exception as e:
+                    print(f"❌ Error running strategy {strat}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    results_all[strat] = {
+                        'results': None,
+                        'portfolio_history': [],
+                        'trade_log': []
+                    }
 
-        # lancer un thread pour chaque stratégie
-        for strat in strategies:
-            t = threading.Thread(target=worker, args=(strat,))
-            threads.append(t)
-            t.start()
-            print(f"🚀 Running strategy: {strat}")
-
-        # attendre que tous les threads finissent
-        for t in threads:
-            t.join()
-
-        # arrêter la collecte
         self.stop_real_time_data()
 
-        # tracer la comparaison des résultats (méthode que tu dois avoir ou définir)
         try:
             self.enhanced_plot_comparison(results_all)
         except Exception as e:
             print("⚠️ Error in enhanced_plot_comparison:", e)
             import traceback
             traceback.print_exc()
-
 
         return results_all
 
