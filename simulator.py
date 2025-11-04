@@ -315,8 +315,8 @@ class EnhancedParallelCryptoSimulatorCG:
         sig = pd.Series(0, index=[prices_subset.index[-1]]) # Initialize with a single value for the last timestamp
 
         # Petit filtre anti-bruit (empêche de trader sur micro-variations)
-        if abs(short_var) < min_price_variation_pct:
-            return pd.Series([0] * len(prices), index=prices.index if prices is not None else None) # Return neutral signal for the whole series
+        if strategy in ("Momentum_Enhanced", "Breakout") and abs(short_var) < min_price_variation_pct:
+            return pd.Series([0] * len(prices), index=prices.index) # Return neutral signal for the whole series
 
         # --- LOGIQUE PAR STRATÉGIE ---
         p = self.params.get(strategy, {})
@@ -447,7 +447,7 @@ class EnhancedParallelCryptoSimulatorCG:
         """
         Version améliorée combinant le signal de base et un filtre RSI.
         """
-        if prices is None or prices.empty or len(prices) < 5:
+        if prices is None or prices.empty or len(prices) < 2:
             return 0
 
         # Pass min_price_variation_pct and lookback_period to generate_signal
@@ -584,7 +584,7 @@ class EnhancedParallelCryptoSimulatorCG:
         while datetime.now() < end_time and self.is_running:
             prices = self.get_current_prices()
             # Si trop peu de données disponibles, attendre
-            if prices is None or len(prices) < len(coins) // 2: # Added None check
+            if not prices: # Added None check
                 time.sleep(1)
                 continue
 
