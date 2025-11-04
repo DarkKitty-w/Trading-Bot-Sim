@@ -1,12 +1,12 @@
-name: Run 5-Hour Crypto Simulation
+name: Run Crypto Simulator
 
 on:
-  workflow_dispatch:  # allows you to manually trigger
+  workflow_dispatch:  # manual trigger
 
 jobs:
   run-simulation:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours total timeout (5h simulation + buffer)
+    timeout-minutes: 360  # 6 hours max for 5h simulation + buffer
 
     steps:
       - name: Checkout repository
@@ -20,45 +20,50 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy matplotlib requests scipy seaborn plotly
+          pip install pandas numpy matplotlib requests seaborn plotly scipy
 
-      - name: Create output directory
-        run: mkdir -p portfolio_logs
+      - name: Create output directories
+        run: |
+          mkdir -p portfolio_logs
+          mkdir -p portfolio_logs/charts
 
-      - name: Run 5-Hour Crypto Simulation and save stdout
+      - name: Run simulator and capture stdout
         run: |
           python simulator.py | tee simulation_output.txt
 
-      - name: List generated files
-        run: |
-          echo "Generated files in portfolio_logs:"
-          ls -la portfolio_logs/
-          echo "CSV files:"
-          find portfolio_logs -name "*.csv" | head -10
-          echo "Checkpoint files:"
-          find portfolio_logs -name "*.pkl" | head -10
-          echo "Plot files:"
-          find portfolio_logs -name "*.png" | head -10
-
-      - name: Upload simulation results (CSV)
+      - name: Upload main log file
         uses: actions/upload-artifact@v4
         with:
-          name: crypto-simulation-csv-results
-          path: portfolio_logs/*.csv
+          name: main-log
+          path: portfolio_logs/enhanced_simulation.log
           retention-days: 30
 
-      - name: Upload checkpoint files
+      - name: Upload summary JSON
         uses: actions/upload-artifact@v4
         with:
-          name: crypto-checkpoint-files
-          path: portfolio_logs/*.pkl
+          name: summary-json
+          path: portfolio_logs/summary_results.json
           retention-days: 30
 
-      - name: Upload plot files
+      - name: Upload trade CSV files
         uses: actions/upload-artifact@v4
         with:
-          name: crypto-plot-files
-          path: portfolio_logs/*.png
+          name: trade-csv
+          path: portfolio_logs/trade_log_*.csv
+          retention-days: 30
+
+      - name: Upload charts (PNG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-png
+          path: portfolio_logs/charts/*.png
+          retention-days: 30
+
+      - name: Upload charts (HTML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-html
+          path: portfolio_logs/charts/*.html
           retention-days: 30
 
       - name: Upload stdout log
@@ -66,11 +71,4 @@ jobs:
         with:
           name: simulation-stdout
           path: simulation_output.txt
-          retention-days: 30
-
-      - name: Upload all logs (backup)
-        uses: actions/upload-artifact@v4
-        with:
-          name: crypto-all-logs-backup
-          path: portfolio_logs/*
           retention-days: 30
