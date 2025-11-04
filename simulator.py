@@ -8,15 +8,6 @@ import time
 import os
 import pickle
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import time
-import threading
-import requests
-import os
-from datetime import datetime, timedelta
-
 class EnhancedParallelCryptoSimulatorCG:
     def __init__(self, starting_cash=1000.0, update_interval=10):
         self.starting_cash = starting_cash
