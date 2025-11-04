@@ -1766,7 +1766,7 @@ if __name__ == "__main__":
     simulation_results = simulator.run_parallel_strategies(
         coins=all_coins,
         strategies=all_strategies,
-        duration_minutes=1,
+        duration_minutes=300,
         lookback_period=30
     )
 
