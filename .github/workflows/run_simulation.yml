@@ -1,20 +1,18 @@
-name: Run Crypto Simulator - Multi Capital (3 Python Files)
+name: Run Crypto Simulator - Multi Capital
 
 on:
   workflow_dispatch:  # manual trigger
-
-defaults:
-  run:
-    shell: bash  # ensure bash syntax works on Ubuntu
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight (optional)
 
 jobs:
   run-simulations:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360  # 6 hours max for all simulations
     strategy:
       matrix:
-        capital: [10, 100, 1000]  # each corresponds to a simulator_X.py file
-
+        capital: [10, 100, 1000]
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,59 +29,55 @@ jobs:
 
       - name: Create output directories
         run: |
-          mkdir -p outputs/${{ matrix.capital }}/charts
+          mkdir -p portfolio_logs_${{ matrix.capital }}
+          mkdir -p portfolio_logs_${{ matrix.capital }}/charts
 
-      - name: Run simulator_${{ matrix.capital }}.py
+      - name: Run ${{ matrix.capital }}$ simulation
         run: |
-          python simulator_${{ matrix.capital }}.py | tee outputs/${{ matrix.capital }}/simulation_output_${{ matrix.capital }}.txt
+          python simulator_${{ matrix.capital }}.py | tee simulation_output_${{ matrix.capital }}.txt
 
-      - name: Upload all results
+      - name: Upload main log file - ${{ matrix.capital }}$
         uses: actions/upload-artifact@v4
         with:
-          name: simulation-${{ matrix.capital }}-results
-          path: outputs/${{ matrix.capital }}/**
+          name: main-log-${{ matrix.capital }}
+          path: portfolio_logs_${{ matrix.capital }}/enhanced_simulation.log
           retention-days: 30
 
-  generate-comparison-report:
-    runs-on: ubuntu-latest
-    needs: run-simulations
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Generate comparison report
-        run: |
-          echo "📊 CAPITAL COMPARISON REPORT" > comparison_report.md
-          echo "=============================" >> comparison_report.md
-          echo "" >> comparison_report.md
-          echo "Generated: $(date)" >> comparison_report.md
-          echo "" >> comparison_report.md
-          python3 << 'EOF' >> comparison_report.md
-import json, os
-
-for capital in [10, 100, 1000]:
-    file_path = f"artifacts/simulation-{capital}-results/summary_results.json"
-    if os.path.exists(file_path):
-        print(f"## ${capital} Simulation\n")
-        with open(file_path) as f:
-            data = json.load(f)
-        for strategy, metrics in data.items():
-            print(f"**{strategy}**:")
-            print(f"- Return: {metrics.get('Return', 0):.2f}%")
-            print(f"- Final Value: ${metrics.get('Final Value', 0):.2f}")
-            print(f"- Sharpe Ratio: {metrics.get('Sharpe Ratio', 0):.2f}")
-            print(f"- Trades: {metrics.get('Trades', 0)}\n")
-        print("---\n")
-EOF
-
-      - name: Upload comparison report
+      - name: Upload summary JSON - ${{ matrix.capital }}$
         uses: actions/upload-artifact@v4
         with:
+          name: summary-json-${{ matrix.capital }}
+          path: portfolio_logs_${{ matrix.capital }}/summary_results.json
+          retention-days: 30
+
+      - name: Upload trade CSV files - ${{ matrix.capital }}$
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-csv-${{ matrix.capital }}
+          path: portfolio_logs_${{ matrix.capital }}/trade_log_*.csv
+          retention-days: 30
+
+      - name: Upload charts (PNG) - ${{ matrix.capital }}$
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-png-${{ matrix.capital }}
+          path: portfolio_logs_${{ matrix.capital }}/charts/*.png
+          retention-days: 30
+
+      - name: Upload charts (HTML) - ${{ matrix.capital }}$
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-html-${{ matrix.capital }}
+          path: portfolio_logs_${{ matrix.capital }}/charts/*.html
+          retention-days: 30
+
+      - name: Upload stdout log - ${{ matrix.capital }}$
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-stdout-${{ matrix.capital }}
+          path: simulation_output_${{ matrix.capital }}.txt
+          retention-days: 30
+
           name: comparison-report
           path: comparison_report.md
           retention-days: 30
