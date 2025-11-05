@@ -29,7 +29,7 @@ matplotlib.use('Agg')  # Pour meilleures performances
 class AdvancedChartGenerator:
     """Générateur de graphiques avancés avec visualisations interactives"""
     
-    def __init__(self, output_dir="portfolio_logs"):
+    def __init__(self, output_dir="portfolio_logs_1000"):
         self.output_dir = output_dir
         os.makedirs(os.path.join(self.output_dir, "charts"), exist_ok=True)
         self.setup_matplotlib_styles()
@@ -773,7 +773,7 @@ class EnhancedParallelCryptoSimulatorCG:
     def __init__(self, starting_cash=1000.0, update_interval=5, max_history_points=1000, 
                  max_drawdown_pct=0.20, min_cash_pct=0.10, max_position_concentration=0.15):
         
-        self.output_dir = "portfolio_logs"
+        self.output_dir = "portfolio_logs_1000"
         os.makedirs(self.output_dir, exist_ok=True)
         self.chart_generator = AdvancedChartGenerator(self.output_dir)
         
