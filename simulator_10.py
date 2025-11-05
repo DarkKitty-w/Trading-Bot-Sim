@@ -709,6 +709,7 @@ class AdvancedChartGenerator:
             )
             
             # Sauvegarde
+
             filename = os.path.join(self.output_dir, "charts", "animated_performance.html")
             fig.write_html(filename)
             return filename
@@ -819,16 +820,52 @@ class EnhancedParallelCryptoSimulatorCG:
             'performance_degradation': False
         }
 
+        # UPDATED: Only top 3 strategies + 2 enhanced + 1 new
         self.params = {
-            "MA_Original": {"window": 5, "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.10, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
-            "MA_Fast": {"short_window": 3, "long_window": 10, "use_ema": True, "use_kama": False, "kama_fast_period": 2, "kama_slow_period": 30, "max_position_pct": 0.20, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m', '15m']},
-            "MA_Enhanced": {"short_window": 5, "long_window": 20, "volatility_threshold": 0.0005, "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
-            "Momentum_Enhanced": {"period": 1, "threshold": 0.3, "smoothing": 1, "max_position_pct": 0.9, "stop_loss_pct": 0.7, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m']},
-            "Breakout": {"period": 5, "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '15m']},
-            "MACD": {"fast": 12, "slow": 26, "signal": 9, "max_position_pct": 0.15, "stop_loss_pct": 0.06, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
-            "ATR_Breakout": {"period": 14, "multiplier": 1.5, "max_position_pct": 0.12, "stop_loss_pct": 2.0, "take_profit_pct": 3.0, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '15m']},
-            "ADX_Trend": {"period": 14, "min_strength": 20, "max_position_pct": 0.10, "stop_loss_pct": 0.08, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "timeframes": ['1m', '5m']},
-            "MeanReversion": {"period": 20, "buy_threshold": 0.99, "sell_threshold": 1.01, "max_position_pct": 0.08, "take_profit_pct": 1.015, "min_price_variation_pct": 0.00005, "confirmation_periods": 1, "limit_buy_offset_pct": -0.003, "trailing_stop_pct": 0.02, "timeframes": ['1m', '5m']}
+            # TOP 3 STRATEGIES FROM ANALYSIS
+            "MeanReversion": {
+                "period": 20, "buy_threshold": 0.99, "sell_threshold": 1.01, 
+                "max_position_pct": 0.08, "take_profit_pct": 1.015, 
+                "min_price_variation_pct": 0.00005, "confirmation_periods": 1, 
+                "limit_buy_offset_pct": -0.003, "trailing_stop_pct": 0.02, 
+                "timeframes": ['1m', '5m']
+            },
+            "MA_Enhanced": {
+                "short_window": 5, "long_window": 20, "volatility_threshold": 0.0005, 
+                "max_position_pct": 0.12, "stop_loss_pct": 0.06, "take_profit_pct": 0.15, 
+                "min_price_variation_pct": 0.00005, "confirmation_periods": 1, 
+                "timeframes": ['1m', '5m']
+            },
+            "Momentum_Enhanced": {
+                "period": 1, "threshold": 0.3, "smoothing": 1, "max_position_pct": 0.9, 
+                "stop_loss_pct": 0.7, "min_price_variation_pct": 0.00005, 
+                "confirmation_periods": 1, "timeframes": ['1m']
+            },
+            
+            # ENHANCED STRATEGIES (Learning from winners and avoiding losers)
+            "MeanReversion_Pro": {
+                "period": 15, "buy_threshold": 0.98, "sell_threshold": 1.02, 
+                "volatility_filter": 0.002, "momentum_confirmation": True,
+                "max_position_pct": 0.10, "stop_loss_pct": 0.04, "take_profit_pct": 0.12,
+                "min_price_variation_pct": 0.00005, "confirmation_periods": 2,
+                "timeframes": ['1m', '5m', '15m']
+            },
+            "MA_Momentum_Hybrid": {
+                "ma_short": 8, "ma_long": 21, "momentum_period": 5, 
+                "momentum_threshold": 0.02, "volume_confirmation": True,
+                "max_position_pct": 0.15, "stop_loss_pct": 0.05, "take_profit_pct": 0.18,
+                "min_price_variation_pct": 0.00005, "confirmation_periods": 1,
+                "timeframes": ['1m', '5m']
+            },
+            
+            # COMPLETELY NEW STRATEGY
+            "Volatility_Regime_Adaptive": {
+                "low_vol_period": 10, "high_vol_period": 5, "vol_threshold": 0.005,
+                "trend_confirmation": True, "regime_smoothing": 3,
+                "max_position_pct": 0.12, "stop_loss_pct": 0.03, "take_profit_pct": 0.10,
+                "min_price_variation_pct": 0.00005, "confirmation_periods": 1,
+                "timeframes": ['1m', '5m', '15m']
+            }
         }
 
         self.coinlore_id_map = {
@@ -1602,7 +1639,49 @@ class EnhancedParallelCryptoSimulatorCG:
             if len(history) < lookback_period:
                 return 0 # Not enough data
 
-            if "MA" in strategy:
+            # ENHANCED SIGNAL CALCULATION FOR NEW STRATEGIES
+            if strategy == "MeanReversion_Pro":
+                # Enhanced mean reversion with volatility filter
+                mean = history.mean()
+                std = history.std()
+                current_price = prices[coin]
+                volatility = history.pct_change().std()
+                
+                if volatility > self.params[strategy].get("volatility_filter", 0.002):
+                    if current_price < mean - 1.2 * std: return 1
+                    elif current_price > mean + 1.2 * std: return -1
+            
+            elif strategy == "MA_Momentum_Hybrid":
+                # MA + Momentum hybrid
+                ma_short = history.iloc[-self.params[strategy].get("ma_short", 8):].mean()
+                ma_long = history.iloc[-self.params[strategy].get("ma_long", 21):].mean()
+                momentum = history.iloc[-1] / history.iloc[-self.params[strategy].get("momentum_period", 5)] - 1
+                
+                if (ma_short > ma_long * 1.002 and 
+                    momentum > self.params[strategy].get("momentum_threshold", 0.02)):
+                    return 1
+                elif (ma_short < ma_long * 0.998 and 
+                      momentum < -self.params[strategy].get("momentum_threshold", 0.02)):
+                    return -1
+            
+            elif strategy == "Volatility_Regime_Adaptive":
+                # New strategy: Adapt to volatility regimes
+                short_vol = history.iloc[-self.params[strategy].get("low_vol_period", 10):].pct_change().std()
+                long_vol = history.pct_change().std()
+                
+                if short_vol < self.params[strategy].get("vol_threshold", 0.005):
+                    # Low volatility regime - use mean reversion
+                    mean = history.mean()
+                    current_price = prices[coin]
+                    if current_price < mean * 0.99: return 1
+                    elif current_price > mean * 1.01: return -1
+                else:
+                    # High volatility regime - use trend following
+                    if history.iloc[-1] > history.iloc[-5:].mean(): return 1
+                    elif history.iloc[-1] < history.iloc[-5:].mean(): return -1
+
+            # ORIGINAL STRATEGIES
+            elif "MA" in strategy:
                 sma_short = history.iloc[-5:].mean()
                 sma_long = history.iloc[-20:].mean()
                 if sma_short > sma_long * 1.001: return 1
@@ -1670,12 +1749,12 @@ class EnhancedParallelCryptoSimulatorCG:
                     print()
         
         print("\n\n--- Strategy Performance (Live) ---")
-        print(f"{'Strategy':<20} | {'Value':<15} | {'Return %':<10} | {'Trades':<8} | {'Win Rate %':<10} | {'Max DD %':<10}")
-        print("-" * 85)
+        print(f"{'Strategy':<25} | {'Value':<15} | {'Return %':<10} | {'Trades':<8} | {'Win Rate %':<10} | {'Max DD %':<10}")
+        print("-" * 90)
         
         for strategy, data in all_results.items():
             res = data.get('results', {})
-            print(f"{strategy:<20} | ${res.get('Final Value', 0):<14.2f} | {res.get('Return', 0):<9.2f}% | {res.get('Trades', 0):<8} | {res.get('Win Rate', 0)*100:<9.2f}% | {res.get('Max Drawdown (%)', 0):<9.2f}%")
+            print(f"{strategy:<25} | ${res.get('Final Value', 0):<14.2f} | {res.get('Return', 0):<9.2f}% | {res.get('Trades', 0):<8} | {res.get('Win Rate', 0)*100:<9.2f}% | {res.get('Max Drawdown (%)', 0):<9.2f}%")
         
         print("\n--- System Alerts ---")
         alerts_triggered = False
@@ -1760,12 +1839,23 @@ if __name__ == "__main__":
     )
 
     all_coins = list(simulator.coinlore_id_map.keys())
-    all_strategies = list(simulator.params.keys())
+    
+    # UPDATED: Only run the top 3 + 2 enhanced + 1 new strategy
+    selected_strategies = [
+        "MeanReversion",           # Top 1
+        "MA_Enhanced",             # Top 2  
+        "Momentum_Enhanced",       # Top 3
+        "MeanReversion_Pro",       # Enhanced version
+        "MA_Momentum_Hybrid",      # Hybrid strategy
+        "Volatility_Regime_Adaptive" # Completely new
+    ]
 
     print("Starting enhanced cryptocurrency trading simulation with REAL CoinLore data...")
+    print(f"Running optimized strategy set: {selected_strategies}")
+    
     simulation_results = simulator.run_parallel_strategies(
         coins=all_coins,
-        strategies=all_strategies,
+        strategies=selected_strategies,
         duration_minutes=300,
         lookback_period=30
     )
