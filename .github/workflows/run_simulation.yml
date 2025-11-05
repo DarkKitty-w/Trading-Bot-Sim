@@ -2,8 +2,6 @@ name: Run Crypto Simulator - Multi Capital
 
 on:
   workflow_dispatch:  # manual trigger
-  schedule:
-    - cron: '0 0 * * 0'  # Run every Sunday at midnight (optional)
 
 jobs:
   run-simulations:
@@ -76,8 +74,4 @@ jobs:
         with:
           name: simulation-stdout-${{ matrix.capital }}
           path: simulation_output_${{ matrix.capital }}.txt
-          retention-days: 30
-
-          name: comparison-report
-          path: comparison_report.md
           retention-days: 30
