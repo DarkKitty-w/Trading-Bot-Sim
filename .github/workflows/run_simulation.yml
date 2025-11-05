@@ -2,8 +2,6 @@ name: Run Crypto Simulator - Multi Capital
 
 on:
   workflow_dispatch:  # manual trigger
-  schedule:
-    - cron: '0 0 * * 0'  # Run every Sunday at midnight (optional)
 
 jobs:
   run-simulations:
@@ -98,29 +96,37 @@ jobs:
           echo "Generated: $(date)" >> comparison_report.md
           echo "" >> comparison_report.md
           
-          for capital in 10 100 1000; do
-            if [ -f "artifacts/summary-json-$capital/summary_results.json" ]; then
-              echo "## $${capital}$ Simulation" >> comparison_report.md
-              python3 -c "
-import json, os
-capital = $capital
-file_path = f'artifacts/summary-json-{capital}/summary_results.json'
-with open(file_path, 'r') as f:
-    data = json.load(f)
-print(f'### {capital}$ Results')
-print('')
-for strategy, metrics in data.items():
-    print(f'**{strategy}**:')
-    print(f'- Return: {metrics.get(\"Return\", 0):.2f}%')
-    print(f'- Final Value: \\${metrics.get(\"Final Value\", 0):.2f}')
-    print(f'- Sharpe: {metrics.get(\"Sharpe Ratio\", 0):.2f}')
-    print(f'- Trades: {metrics.get(\"Trades\", 0)}')
-    print('')
-print('---')
-print('')
-" >> comparison_report.md
-            fi
-          done
+          # Create a Python script to generate the comparison
+          cat > generate_comparison.py << 'EOF'
+import json
+import os
+
+capitals = [10, 100, 1000]
+
+for capital in capitals:
+    file_path = f"artifacts/summary-json-{capital}/summary_results.json"
+    if os.path.exists(file_path):
+        print(f"## {capital}$ Simulation")
+        print("")
+        print(f"### {capital}$ Results")
+        print("")
+        
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        
+        for strategy, metrics in data.items():
+            print(f"**{strategy}**:")
+            print(f"- Return: {metrics.get('Return', 0):.2f}%")
+            print(f"- Final Value: ${metrics.get('Final Value', 0):.2f}")
+            print(f"- Sharpe: {metrics.get('Sharpe Ratio', 0):.2f}")
+            print(f"- Trades: {metrics.get('Trades', 0)}")
+            print("")
+        
+        print("---")
+        print("")
+EOF
+
+          python generate_comparison.py >> comparison_report.md
 
       - name: Upload comparison report
         uses: actions/upload-artifact@v4
