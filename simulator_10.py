@@ -1857,7 +1857,7 @@ if __name__ == "__main__":
         coins=all_coins,
         strategies=selected_strategies,
         duration_minutes=300,
-        lookback_period=30
+        lookback_period=60 #30
     )
 
     performance_report = simulator.generate_performance_report(simulation_results)
