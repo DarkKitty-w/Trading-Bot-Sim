@@ -1832,7 +1832,7 @@ class EnhancedParallelCryptoSimulatorCG:
 if __name__ == "__main__":
     simulator = EnhancedParallelCryptoSimulatorCG(
         starting_cash=1000, #sim 1 2: 5000,
-        update_interval=3,
+        update_interval=10,
         max_drawdown_pct=0.20,
         min_cash_pct=0.10,
         max_position_concentration=0.25
