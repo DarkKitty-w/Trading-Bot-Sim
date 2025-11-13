@@ -1,4 +1,4 @@
-name: Run Crypto Simulator - Continouse
+name: Run Crypto Simulator - Continuous
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
       # --- 1. PREPARE DIRECTORIES ---
       - name: Create output directories
         run: |
-          # Paths are now hardcoded for '10'
+          # Paths are hardcoded for '10'
           mkdir -p portfolio_logs_10/charts
           mkdir -p full_results/logs
           mkdir -p full_results/json
@@ -73,19 +73,39 @@ jobs:
       - name: Aggregate and prepare results - 10$
         run: |
           echo "Aggregating results for run at ${{ inputs.elapsed_duration_hours }}h"
-          # All paths are hardcoded for '10'
+          
+          # 1. Log Aggregation
           cat portfolio_logs_10/enhanced_simulation.log >> full_results/logs/main-log-full.log
+          
+          # 2. JSON Aggregation (JSON Lines)
           cat portfolio_logs_10/summary_results.json >> full_results/json/summary-results-full.jsonl
           
-          if [ ! -f full_results/csv/trade_log_all.csv ]; then
-             cp portfolio_logs_10/trade_log_*.csv full_results/csv/trade_log_all.csv
+          # 3. CSV Aggregation (FIXED: Using explicit filename trade_log_10.csv)
+          CSV_FILE="portfolio_logs_10/trade_log_10.csv" 
+          ALL_CSV_PATH="full_results/csv/trade_log_all.csv"
+          
+          if [ ! -f $ALL_CSV_PATH ]; then
+             echo "Creating initial full CSV file."
+             cp $CSV_FILE $ALL_CSV_PATH
           else
-             tail -n +2 portfolio_logs_10/trade_log_*.csv >> full_results/csv/trade_log_all.csv
+             echo "Appending new trade logs (skipping header)."
+             tail -n +2 $CSV_FILE >> $ALL_CSV_PATH
           fi
           
+          # 4. Chart Aggregation (Added file checks for robustness)
           RUN_ID="run_${{ inputs.elapsed_duration_hours }}h"
-          for f in portfolio_logs_10/charts/*.png; do cp "$f" "full_results/charts-png/$(basename "$f" .png)_${RUN_ID}.png"; done
-          for f in portfolio_logs_10/charts/*.html; do cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"; done
+          
+          for f in portfolio_logs_10/charts/*.png; do 
+            if [ -f "$f" ]; then 
+              cp "$f" "full_results/charts-png/$(basename "$f" .png)_${RUN_ID}.png"; 
+            fi
+          done
+          
+          for f in portfolio_logs_10/charts/*.html; do 
+            if [ -f "$f" ]; then 
+              cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"; 
+            fi
+          done
           
       # --- 5. UPLOAD NEW STATE & AGGREGATED RESULTS ---
       - name: Upload CURRENT state - 10$
@@ -120,7 +140,7 @@ jobs:
           fi
 
       - name: Trigger next run
-        if: steps.calc.outputs.CONTINUE == 'true' # Removed matrix condition
+        if: steps.calc.outputs.CONTINUE == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
