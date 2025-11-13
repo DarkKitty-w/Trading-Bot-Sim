@@ -23,7 +23,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 import matplotlib
-import copy  # <-- ADDED IMPORT FOR STATE PERSISTENCE
+import copy
+import sys  # Added for command line arguments
 
 matplotlib.use('Agg')  # Pour meilleures performances
 
@@ -1972,10 +1973,20 @@ class CryptoTradingSimulator:
             with open(os.path.join(self.output_dir, 'summary_results.json'), 'w') as f:
                 json.dump(summary, f, indent=4)
             
+            # Combine all trade logs into one file named with the capital amount
+            all_trades = []
             for strategy, data in all_results.items():
                 if data['trade_log']:
                     df = pd.DataFrame(data['trade_log'])
+                    df['strategy'] = strategy
+                    all_trades.append(df)
+                    # Also write per strategy CSV
                     df.to_csv(os.path.join(self.output_dir, f'trade_log_{strategy}.csv'), index=False)
+            
+            # Write combined trade log with capital in filename (e.g., trade_log_10.csv)
+            if all_trades:
+                combined_df = pd.concat(all_trades, ignore_index=True)
+                combined_df.to_csv(os.path.join(self.output_dir, f'trade_log_{self.starting_cash}.csv'), index=False)
                     
             self.enhanced_log('INFO', "Results exported successfully.")
             
@@ -1997,12 +2008,20 @@ class CryptoTradingSimulator:
             self.enhanced_log('ERROR', f"Erreur lors de la génération des graphiques: {e}")
             return {}
 
-# --- MODIFIED MAIN EXECUTION BLOCK WITH STATE PERSISTENCE ---
+# --- MODIFIED MAIN EXECUTION BLOCK WITH COMMAND LINE ARGUMENT SUPPORT ---
 if __name__ == "__main__":
     
-    # --- STATEFUL MODIFICATION ---
-    # This value must match the one in the YML matrix (e.g., 10, 100, 1000)
-    CAPITAL = 10 
+    # --- READ COMMAND LINE ARGUMENT ---
+    # Default to 10 if no argument provided
+    if len(sys.argv) > 1:
+        try:
+            CAPITAL = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid capital argument: {sys.argv[1]}. Using default: 10")
+            CAPITAL = 10
+    else:
+        CAPITAL = 10
+    
     OUTPUT_DIR = f"portfolio_logs_{CAPITAL}"
     STATE_FILE = os.path.join(OUTPUT_DIR, "simulation_state.json")
     
@@ -2045,6 +2064,7 @@ if __name__ == "__main__":
 
         print(f"Running optimized strategy set: {selected_strategies}")
         
+        # Each chunk runs for 5 hours (300 minutes) as per the workflow
         simulation_results = simulator.run_parallel_strategies(
             coins=all_coins,
             strategies=selected_strategies,
