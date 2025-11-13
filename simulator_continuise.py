@@ -161,7 +161,7 @@ class CryptoTradingSimulator:
         self.data_fetcher = DataFetcher(
             coinlore_id_map={
                 # ... (coinlore_id_map unchanged) ...
-                'BTC-USD': '90', 'ETH-USD': '80', 'BNB-USD': '2710', 'SOL-USD': '48543', 'XRP-USD': '58', 'DOGE-USD': '2', 'ADA-USD': '257', 'TRX-USD': '2727', 'AVAX-USD': '44883', 'DOT-USD': '45031', 'LINK-USD': '2751', 'MATIC-USD': '33536', 'SHIB-USD': '49302', 'LTC-USD': '1', 'ICP-USD': '47333',s 'BCH-USD': '2321', 'ETC-USD': '60', 'NEAR-USD': '46013', 'XLM-USD': '51', 'FIL-USD': '2280', 'ATOM-USD': '3334', 'INJ-USD': '44105', 'HBAR-USD': '39366', 'IMX-USD': '48043', 'XMR-USD': '29', 'CRO-USD': '2995', 'APT-USD': '51111', 'LDO-USD': '48239', 'VET-USD': '3000'
+                'BTC-USD': '90', 'ETH-USD': '80', 'BNB-USD': '2710', 'SOL-USD': '48543', 'XRP-USD': '58', 'DOGE-USD': '2', 'ADA-USD': '257', 'TRX-USD': '2727', 'AVAX-USD': '44883', 'DOT-USD': '45031', 'LINK-USD': '2751', 'MATIC-USD': '33536', 'SHIB-USD': '49302', 'LTC-USD': '1', 'ICP-USD': '47333', 'BCH-USD': '2321', 'ETC-USD': '60', 'NEAR-USD': '46013', 'XLM-USD': '51', 'FIL-USD': '2280', 'ATOM-USD': '3334', 'INJ-USD': '44105', 'HBAR-USD': '39366', 'IMX-USD': '48043', 'XMR-USD': '29', 'CRO-USD': '2995', 'APT-USD': '51111', 'LDO-USD': '48239', 'VET-USD': '3000'
             },
             update_interval=self.update_interval
         )
