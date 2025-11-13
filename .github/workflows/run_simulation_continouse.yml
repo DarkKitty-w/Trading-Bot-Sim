@@ -1,0 +1,139 @@
+name: Run Crypto Simulator - Continouse
+
+on:
+  workflow_dispatch:
+    inputs:
+      total_duration_hours:
+        description: 'Total desired simulation time in hours (e.g., 48)'
+        required: true
+        default: '24'
+      elapsed_duration_hours:
+        description: 'Internal: Time already elapsed (DO NOT set manually)'
+        required: false
+        default: '0'
+
+jobs:
+  run-simulation-10: # Simplified job, no matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 320 # 5h 20m timeout
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up GitHub CLI
+        run: sudo apt-get install gh -y
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy matplotlib requests seaborn plotly scipy
+
+      # --- 1. PREPARE DIRECTORIES ---
+      - name: Create output directories
+        run: |
+          # Paths are now hardcoded for '10'
+          mkdir -p portfolio_logs_10/charts
+          mkdir -p full_results/logs
+          mkdir -p full_results/json
+          mkdir -p full_results/csv
+          mkdir -p full_results/charts-png
+          mkdir -p full_results/charts-html
+          mkdir -p full_results/stdout
+
+      # --- 2. DOWNLOAD PREVIOUS STATE & RESULTS ---
+      - name: Download PREVIOUS state - 10$
+        uses: actions/download-artifact@v4
+        with:
+          name: simulation-state-10 # Artifact name is hardcoded
+          path: portfolio_logs_10/  # Path is hardcoded
+        continue-on-error: true
+
+      - name: Download PREVIOUS full results - 10$
+        uses: actions/download-artifact@v4
+        with:
+          name: full-results-10 # Artifact name is hardcoded
+          path: full_results/
+        continue-on-error: true
+      
+      # --- 3. RUN SIMULATION CHUNK ---
+      - name: Run 10$ simulation (5 hour chunk)
+        run: |
+          # We now explicitly call the script with '10' as the argument
+          python simulator_continuise.py 10 | tee full_results/stdout/simulation_stdout_${{ inputs.elapsed_duration_hours }}h.txt
+        
+      # --- 4. AGGREGATE RESULTS ---
+      - name: Aggregate and prepare results - 10$
+        run: |
+          echo "Aggregating results for run at ${{ inputs.elapsed_duration_hours }}h"
+          # All paths are hardcoded for '10'
+          cat portfolio_logs_10/enhanced_simulation.log >> full_results/logs/main-log-full.log
+          cat portfolio_logs_10/summary_results.json >> full_results/json/summary-results-full.jsonl
+          
+          if [ ! -f full_results/csv/trade_log_all.csv ]; then
+             cp portfolio_logs_10/trade_log_*.csv full_results/csv/trade_log_all.csv
+          else
+             tail -n +2 portfolio_logs_10/trade_log_*.csv >> full_results/csv/trade_log_all.csv
+          fi
+          
+          RUN_ID="run_${{ inputs.elapsed_duration_hours }}h"
+          for f in portfolio_logs_10/charts/*.png; do cp "$f" "full_results/charts-png/$(basename "$f" .png)_${RUN_ID}.png"; done
+          for f in portfolio_logs_10/charts/*.html; do cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"; done
+          
+      # --- 5. UPLOAD NEW STATE & AGGREGATED RESULTS ---
+      - name: Upload CURRENT state - 10$
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-state-10 # Hardcoded name
+          path: portfolio_logs_10/simulation_state.json # Hardcoded path
+          retention-days: 7
+
+      - name: Upload FULL aggregated results - 10$
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-results-10 # Hardcoded name
+          path: full_results/
+          retention-days: 30
+
+      # --- 6. LOOPING LOGIC ---
+      - name: Calculate next run
+        id: calc
+        run: |
+          RUN_CHUNK_HOURS=5
+          ELAPSED=${{ inputs.elapsed_duration_hours }}
+          TOTAL=${{ inputs.total_duration_hours }}
+          NEW_ELAPSED=$(($ELAPSED + $RUN_CHUNK_HOURS))
+          echo "Total duration: $TOTAL hours, Time after this run: $NEW_ELAPSED hours"
+          if [ $NEW_ELAPSED -lt $TOTAL ]; then
+            echo "CONTINUE=true" >> $GITHUB_OUTPUT
+            echo "NEW_ELAPSED=$NEW_ELAPSED" >> $GITHUB_OUTPUT
+          else
+            echo "CONTINUE=false" >> $GITHUB_OUTPUT
+            echo "--- SIMULATION COMPLETE ---"
+          fi
+
+      - name: Trigger next run
+        if: steps.calc.outputs.CONTINUE == 'true' # Removed matrix condition
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          echo "Triggering next run, elapsed time will be: ${{ steps.calc.outputs.NEW_ELAPSED }} hours..."
+          WORKFLOW_FILE=$(basename $GITHUB_WORKFLOW)
+          gh workflow run $WORKFLOW_FILE \
+            -R $GH_REPO \
+            -f total_duration_hours=${{ inputs.total_duration_hours }} \
+            -f elapsed_duration_hours=${{ steps.calc.outputs.NEW_ELAPSED }}
+            
+      - name: Final Run Complete
+        if: steps.calc.outputs.CONTINUE == 'false'
+        run: |
+          echo "This was the final run."
+          echo "The artifact 'full-results-10' now contains all aggregated data."
