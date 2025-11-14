@@ -146,8 +146,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           echo "Triggering next run, elapsed time will be: ${{ steps.calc.outputs.NEW_ELAPSED }} hours..."
-          WORKFLOW_FILE=$(basename $GITHUB_WORKFLOW)
-          gh workflow run $WORKFLOW_FILE \
+          # FIXED: Use the actual workflow filename instead of trying to get it from display name
+          gh workflow run run_simulation_continouse.yml \
             -R $GH_REPO \
             -f total_duration_hours=${{ inputs.total_duration_hours }} \
             -f elapsed_duration_hours=${{ steps.calc.outputs.NEW_ELAPSED }}
