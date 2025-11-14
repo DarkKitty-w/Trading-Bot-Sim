@@ -12,11 +12,15 @@ on:
         required: false
         default: '0'
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
-  run-simulation-10: # Simplified job, no matrix
+  run-simulation-10:
     runs-on: ubuntu-latest
-    timeout-minutes: 320 # 5h 20m timeout
-    
+    timeout-minutes: 320
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,20 +30,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up GitHub CLI
-        run: sudo apt-get install gh -y
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy matplotlib requests seaborn plotly scipy
+          pip install pandas numpy matplotlib requests seaborn plotly scipy jq
 
-      # --- 1. PREPARE DIRECTORIES ---
+      # create directories (robust)
       - name: Create output directories
         run: |
-          # Paths are hardcoded for '10'
           mkdir -p portfolio_logs_10/charts
           mkdir -p full_results/logs
           mkdir -p full_results/json
@@ -48,81 +46,92 @@ jobs:
           mkdir -p full_results/charts-html
           mkdir -p full_results/stdout
 
-      # --- 2. DOWNLOAD PREVIOUS STATE & RESULTS ---
+      # download previous artifacts if present (won't fail the job)
       - name: Download PREVIOUS state - 10$
         uses: actions/download-artifact@v4
         with:
-          name: simulation-state-10 # Artifact name is hardcoded
-          path: portfolio_logs_10/  # Path is hardcoded
+          name: simulation-state-10
+          path: portfolio_logs_10/
         continue-on-error: true
 
       - name: Download PREVIOUS full results - 10$
         uses: actions/download-artifact@v4
         with:
-          name: full-results-10 # Artifact name is hardcoded
+          name: full-results-10
           path: full_results/
         continue-on-error: true
-      
-      # --- 3. RUN SIMULATION CHUNK ---
+
+      # run the simulation chunk (5 hour chunk)
       - name: Run 10$ simulation (5 hour chunk)
         run: |
-          # We now explicitly call the script with '10' as the argument
           python simulator_continuise.py 10 | tee full_results/stdout/simulation_stdout_${{ inputs.elapsed_duration_hours }}h.txt
-        
-      # --- 4. AGGREGATE RESULTS ---
+
+      # aggregate logs + results safely (only if files exist)
       - name: Aggregate and prepare results - 10$
         run: |
           echo "Aggregating results for run at ${{ inputs.elapsed_duration_hours }}h"
-          
-          # 1. Log Aggregation
-          cat portfolio_logs_10/enhanced_simulation.log >> full_results/logs/main-log-full.log
-          
-          # 2. JSON Aggregation (JSON Lines)
-          cat portfolio_logs_10/summary_results.json >> full_results/json/summary-results-full.jsonl
-          
-          # 3. CSV Aggregation (FIXED: Using explicit filename trade_log_10.csv)
-          CSV_FILE="portfolio_logs_10/trade_log_10.csv" 
-          ALL_CSV_PATH="full_results/csv/trade_log_all.csv"
-          
-          if [ ! -f $ALL_CSV_PATH ]; then
-             echo "Creating initial full CSV file."
-             cp $CSV_FILE $ALL_CSV_PATH
+
+          # 1. Log Aggregation (if exists)
+          if [ -f portfolio_logs_10/enhanced_simulation.log ]; then
+            cat portfolio_logs_10/enhanced_simulation.log >> full_results/logs/main-log-full.log
           else
-             echo "Appending new trade logs (skipping header)."
-             tail -n +2 $CSV_FILE >> $ALL_CSV_PATH
+            echo "No enhanced_simulation.log found in portfolio_logs_10"
           fi
-          
-          # 4. Chart Aggregation (Added file checks for robustness)
+
+          # 2. JSON Aggregation (convert to JSONL safely if file exists)
+          if [ -f portfolio_logs_10/summary_results.json ]; then
+            # convert JSON (maybe pretty) to compact JSON and append as JSONL
+            jq -c . portfolio_logs_10/summary_results.json >> full_results/json/summary-results-full.jsonl
+          else
+            echo "No summary_results.json found"
+          fi
+
+          # 3. CSV Aggregation
+          CSV_FILE="portfolio_logs_10/trade_log_10.csv"
+          ALL_CSV_PATH="full_results/csv/trade_log_all.csv"
+
+          if [ -f "$CSV_FILE" ]; then
+            if [ ! -f "$ALL_CSV_PATH" ]; then
+              echo "Creating initial full CSV file."
+              cp "$CSV_FILE" "$ALL_CSV_PATH"
+            else
+              echo "Appending new trade logs (skipping header)."
+              tail -n +2 "$CSV_FILE" >> "$ALL_CSV_PATH"
+            fi
+          else
+            echo "No trade_log_10.csv found in portfolio_logs_10"
+          fi
+
+          # 4. Chart Aggregation (copy png/html if present)
           RUN_ID="run_${{ inputs.elapsed_duration_hours }}h"
-          
-          for f in portfolio_logs_10/charts/*.png; do 
-            if [ -f "$f" ]; then 
-              cp "$f" "full_results/charts-png/$(basename "$f" .png)_${RUN_ID}.png"; 
-            fi
+          for f in portfolio_logs_10/charts/*.png; do
+            [ -f "$f" ] || continue
+            cp "$f" "full_results/charts-png/$(basename "$f" .png)_${RUN_ID}.png"
           done
-          
-          for f in portfolio_logs_10/charts/*.html; do 
-            if [ -f "$f" ]; then 
-              cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"; 
-            fi
+
+          for f in portfolio_logs_10/charts/*.html; do
+            [ -f "$f" ] || continue
+            cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"
           done
-          
-      # --- 5. UPLOAD NEW STATE & AGGREGATED RESULTS ---
+
+      # upload updated state (if exists) and aggregated results
       - name: Upload CURRENT state - 10$
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: simulation-state-10 # Hardcoded name
-          path: portfolio_logs_10/simulation_state.json # Hardcoded path
+          name: simulation-state-10
+          path: portfolio_logs_10/simulation_state.json
           retention-days: 7
 
       - name: Upload FULL aggregated results - 10$
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: full-results-10 # Hardcoded name
+          name: full-results-10
           path: full_results/
           retention-days: 30
 
-      # --- 6. LOOPING LOGIC ---
+      # compute whether to continue; chunk size = 5 hrs
       - name: Calculate next run
         id: calc
         run: |
@@ -136,22 +145,36 @@ jobs:
             echo "NEW_ELAPSED=$NEW_ELAPSED" >> $GITHUB_OUTPUT
           else
             echo "CONTINUE=false" >> $GITHUB_OUTPUT
-            echo "--- SIMULATION COMPLETE ---"
+            echo "NEW_ELAPSED=$NEW_ELAPSED" >> $GITHUB_OUTPUT
           fi
 
+      # install GH CLI action (official) so `gh` is available
+      - name: Install GitHub CLI
+        uses: cli/cli@v2
+
+      # authenticate gh CLI using your PAT (stored in repo secret GH_PAT)
+      - name: Authenticate gh CLI (for dispatch)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then
+            echo "GH_PAT is empty — cannot authenticate gh CLI"
+            exit 1
+          fi
+          echo "$GH_PAT" | gh auth login --with-token
+
+      # trigger next run using gh if we should continue
       - name: Trigger next run
         if: steps.calc.outputs.CONTINUE == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           echo "Triggering next run, elapsed time will be: ${{ steps.calc.outputs.NEW_ELAPSED }} hours..."
-          # FIXED: Use the actual workflow filename instead of trying to get it from display name
           gh workflow run run_simulation_continouse.yml \
             -R $GH_REPO \
             -f total_duration_hours=${{ inputs.total_duration_hours }} \
             -f elapsed_duration_hours=${{ steps.calc.outputs.NEW_ELAPSED }}
-            
+
       - name: Final Run Complete
         if: steps.calc.outputs.CONTINUE == 'false'
         run: |
