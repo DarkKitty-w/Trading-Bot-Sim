@@ -13,11 +13,10 @@ on:
         default: '0'
 
 jobs:
-  run-simulation-10: # Simplified job, no matrix
+  run-simulation-10:
     runs-on: ubuntu-latest
-    timeout-minutes: 320 # 5h 20m timeout
+    timeout-minutes: 320
     
-    # ADD THIS: Give the workflow permission to trigger other workflow runs
     permissions:
       contents: write
       actions: write
@@ -31,9 +30,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up GitHub CLI
-        run: sudo apt-get install gh -y
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -42,7 +38,6 @@ jobs:
       # --- 1. PREPARE DIRECTORIES ---
       - name: Create output directories
         run: |
-          # Paths are hardcoded for '10'
           mkdir -p portfolio_logs_10/charts
           mkdir -p full_results/logs
           mkdir -p full_results/json
@@ -55,21 +50,20 @@ jobs:
       - name: Download PREVIOUS state - 10$
         uses: actions/download-artifact@v4
         with:
-          name: simulation-state-10 # Artifact name is hardcoded
-          path: portfolio_logs_10/  # Path is hardcoded
+          name: simulation-state-10
+          path: portfolio_logs_10/
         continue-on-error: true
 
       - name: Download PREVIOUS full results - 10$
         uses: actions/download-artifact@v4
         with:
-          name: full-results-10 # Artifact name is hardcoded
+          name: full-results-10
           path: full_results/
         continue-on-error: true
       
       # --- 3. RUN SIMULATION CHUNK ---
       - name: Run 10$ simulation (5 hour chunk)
         run: |
-          # We now explicitly call the script with '10' as the argument
           python simulator_continuise.py 10 | tee full_results/stdout/simulation_stdout_${{ inputs.elapsed_duration_hours }}h.txt
         
       # --- 4. AGGREGATE RESULTS ---
@@ -87,7 +81,7 @@ jobs:
             cat portfolio_logs_10/summary_results.json >> full_results/json/summary-results-full.jsonl
           fi
           
-          # 3. CSV Aggregation (FIXED: Using explicit filename trade_log_10.csv)
+          # 3. CSV Aggregation
           CSV_FILE="portfolio_logs_10/trade_log_10.csv" 
           ALL_CSV_PATH="full_results/csv/trade_log_all.csv"
           
@@ -101,7 +95,7 @@ jobs:
             fi
           fi
           
-          # 4. Chart Aggregation (Added file checks for robustness)
+          # 4. Chart Aggregation
           RUN_ID="run_${{ inputs.elapsed_duration_hours }}h"
           
           for f in portfolio_logs_10/charts/*.png; do 
@@ -120,14 +114,14 @@ jobs:
       - name: Upload CURRENT state - 10$
         uses: actions/upload-artifact@v4
         with:
-          name: simulation-state-10 # Hardcoded name
-          path: portfolio_logs_10/simulation_state.json # Hardcoded path
+          name: simulation-state-10
+          path: portfolio_logs_10/simulation_state.json
           retention-days: 7
 
       - name: Upload FULL aggregated results - 10$
         uses: actions/upload-artifact@v4
         with:
-          name: full-results-10 # Hardcoded name
+          name: full-results-10
           path: full_results/
           retention-days: 30
 
@@ -150,15 +144,19 @@ jobs:
 
       - name: Trigger next run (if continuing)
         if: steps.calc.outputs.CONTINUE == 'true'
-        env:
-          # Use a Personal Access Token (PAT) instead of GITHUB_TOKEN
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           echo "Triggering next run, elapsed time will be: ${{ steps.calc.outputs.NEW_ELAPSED }} hours..."
-          gh workflow run run_simulation_continouse.yml \
-            -R ${{ github.repository }} \
-            -f total_duration_hours=${{ inputs.total_duration_hours }} \
-            -f elapsed_duration_hours=${{ steps.calc.outputs.NEW_ELAPSED }}
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/run_simulation_continouse.yml/dispatches" \
+            -d '{
+              "ref": "${{ github.ref }}",
+              "inputs": {
+                "total_duration_hours": "${{ inputs.total_duration_hours }}",
+                "elapsed_duration_hours": "${{ steps.calc.outputs.NEW_ELAPSED }}"
+              }
+            }'
             
       - name: Final Run Complete
         if: steps.calc.outputs.CONTINUE == 'false'
