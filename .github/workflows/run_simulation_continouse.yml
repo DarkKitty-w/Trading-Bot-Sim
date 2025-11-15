@@ -11,15 +11,19 @@ on:
         description: 'Internal: Time already elapsed (DO NOT set manually)'
         required: false
         default: '0'
+      debug_skip_first_run:
+        description: 'DEBUG: Skip simulation and trigger next run immediately'
+        required: true
+        default: 'false'
+      debug_start_from_hour:
+        description: 'DEBUG: Start from specific hour (overrides elapsed_duration_hours)'
+        required: false
+        default: '0'
 
 jobs:
   run-simulation-10:
     runs-on: ubuntu-latest
     timeout-minutes: 320
-    
-    permissions:
-      contents: write
-      actions: write
     
     steps:
       - name: Checkout repository
@@ -30,7 +34,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      # --- DEBUG: SKIP SIMULATION IF REQUESTED ---
+      - name: Debug - Skip simulation run
+        if: inputs.debug_skip_first_run == 'true'
+        run: |
+          echo "⚠️ DEBUG MODE: Skipping simulation execution"
+          echo "This run will only download existing artifacts and trigger next run"
+          echo "Starting from hour: ${{ inputs.debug_start_from_hour }}"
+
       - name: Install dependencies
+        if: inputs.debug_skip_first_run == 'false'
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy matplotlib requests seaborn plotly scipy
@@ -61,13 +74,15 @@ jobs:
           path: full_results/
         continue-on-error: true
       
-      # --- 3. RUN SIMULATION CHUNK ---
+      # --- 3. RUN SIMULATION CHUNK (SKIPPED IN DEBUG MODE) ---
       - name: Run 10$ simulation (5 hour chunk)
+        if: inputs.debug_skip_first_run == 'false'
         run: |
           python simulator_continuise.py 10 | tee full_results/stdout/simulation_stdout_${{ inputs.elapsed_duration_hours }}h.txt
         
-      # --- 4. AGGREGATE RESULTS ---
+      # --- 4. AGGREGATE RESULTS (SKIPPED IN DEBUG MODE) ---
       - name: Aggregate and prepare results - 10$
+        if: inputs.debug_skip_first_run == 'false'
         run: |
           echo "Aggregating results for run at ${{ inputs.elapsed_duration_hours }}h"
           
@@ -109,6 +124,13 @@ jobs:
               cp "$f" "full_results/charts-html/$(basename "$f" .html)_${RUN_ID}.html"; 
             fi
           done
+
+      # --- DEBUG: SIMULATE SUCCESSFUL RUN ---
+      - name: Debug - Create dummy state file
+        if: inputs.debug_skip_first_run == 'true'
+        run: |
+          echo "Creating dummy state file for debug continuation..."
+          echo '{"debug_mode": true, "elapsed_hours": "${{ inputs.debug_start_from_hour }}", "timestamp": "'$(date)'"}' > portfolio_logs_10/simulation_state.json
           
       # --- 5. UPLOAD NEW STATE & AGGREGATED RESULTS ---
       - name: Upload CURRENT state - 10$
@@ -119,6 +141,7 @@ jobs:
           retention-days: 7
 
       - name: Upload FULL aggregated results - 10$
+        if: inputs.debug_skip_first_run == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: full-results-10
@@ -130,7 +153,15 @@ jobs:
         id: calc
         run: |
           RUN_CHUNK_HOURS=5
-          ELAPSED=${{ inputs.elapsed_duration_hours }}
+          
+          # Use debug start hour if provided, otherwise use elapsed_duration_hours
+          if [ "${{ inputs.debug_start_from_hour }}" != "0" ]; then
+            ELAPSED=${{ inputs.debug_start_from_hour }}
+            echo "Using debug start hour: $ELAPSED"
+          else
+            ELAPSED=${{ inputs.elapsed_duration_hours }}
+          fi
+          
           TOTAL=${{ inputs.total_duration_hours }}
           NEW_ELAPSED=$(($ELAPSED + $RUN_CHUNK_HOURS))
           echo "Total duration: $TOTAL hours, Time after this run: $NEW_ELAPSED hours"
@@ -142,21 +173,60 @@ jobs:
             echo "--- SIMULATION COMPLETE ---"
           fi
 
-      - name: Trigger next run (if continuing)
+      - name: Get workflow ID and trigger next run
         if: steps.calc.outputs.CONTINUE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           echo "Triggering next run, elapsed time will be: ${{ steps.calc.outputs.NEW_ELAPSED }} hours..."
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+          
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq curl
+          
+          # Get all workflows and find the specific one by name
+          echo "Getting workflow ID for: run_simulation_continouse.yml"
+          WORKFLOW_RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/run_simulation_continouse.yml/dispatches" \
-            -d '{
-              "ref": "${{ github.ref }}",
-              "inputs": {
-                "total_duration_hours": "${{ inputs.total_duration_hours }}",
-                "elapsed_duration_hours": "${{ steps.calc.outputs.NEW_ELAPSED }}"
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows")
+          
+          echo "Workflows response:"
+          echo "$WORKFLOW_RESPONSE" | jq .
+          
+          # Extract the workflow ID for our specific workflow file
+          WORKFLOW_ID=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflows[] | select(.path == ".github/workflows/run_simulation_continouse.yml") | .id')
+          
+          if [ -z "$WORKFLOW_ID" ] || [ "$WORKFLOW_ID" = "null" ]; then
+            echo "ERROR: Could not find workflow ID for run_simulation_continouse.yml"
+            echo "Available workflows:"
+            echo "$WORKFLOW_RESPONSE" | jq -r '.workflows[] | "\(.name) - \(.path) - \(.id)"'
+            exit 1
+          fi
+          
+          echo "Found workflow ID: $WORKFLOW_ID"
+          
+          # Trigger the workflow using the ID
+          echo "Triggering workflow dispatch..."
+          TRIGGER_RESPONSE=$(curl -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/dispatches" \
+            -d "{
+              \"ref\": \"${{ github.ref }}\",
+              \"inputs\": {
+                \"total_duration_hours\": \"${{ inputs.total_duration_hours }}\",
+                \"elapsed_duration_hours\": \"${{ steps.calc.outputs.NEW_ELAPSED }}\",
+                \"debug_skip_first_run\": \"false\",
+                \"debug_start_from_hour\": \"0\"
               }
-            }'
+            }")
+          
+          echo "Trigger response: $TRIGGER_RESPONSE"
+          
+          if [ -z "$TRIGGER_RESPONSE" ]; then
+            echo "✅ Successfully triggered next workflow run!"
+          else
+            echo "Trigger response: $TRIGGER_RESPONSE"
+          fi
             
       - name: Final Run Complete
         if: steps.calc.outputs.CONTINUE == 'false'
